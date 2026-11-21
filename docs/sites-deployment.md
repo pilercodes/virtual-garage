@@ -28,3 +28,10 @@ Use the Sites connector and source workflow to register the project once, save a
 - Sites version: `appgprj_6b01de1e1d148191bb842cb4d38b147c~appgver_8ee8374585e8819181c7defee1fac5db`
 
 Sites returned a successful private deployment, and the hosted URL showed the ChatGPT sign-in gate. The Sites database inspection returned the declared DB binding with no tables. Repackaging under the same SHA reused the existing saved version. The next release needs a fresh approved source commit with the tracked Drizzle migration layout. Verify both tables on the hosted binding before testing writes or reporting the app ready.
+
+## Hosted schema release
+
+- GitHub main and Sites source: `17594f660fa5e8e445fa863eadf2f64b5c2bc60f` (merged PR #4).
+- Sites version: `appgprj_6b01de1e1d148191bb842cb4d38b147c~appgver_2bb495e9a57481919b29bc443c1493af`.
+- The same owner-only URL served the new release. The archive contained `.openai/hosting.json`, `dist/server/index.js`, and `drizzle/` with its journal. Sites D1 reported both `vehicles` and `maintenance` after publication.
+- The source push was followed by an explicit private save-and-deploy action. All six tests passed. Hosted write and reload verification needs the site's signed-in owner session.
