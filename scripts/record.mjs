@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 
 const url = process.env.GARAGE_URL ?? 'http://127.0.0.1:3000';
 const output = resolve(process.argv[2] ?? 'recordings');
-const size = { width: 1920, height: 1080 };
+const size = { width: 1600, height: 900 };
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch();
 
@@ -90,9 +90,12 @@ try {
       await move(page, cards.nth(index));
       await page.waitForTimeout(900);
     }
-    await page.evaluate(() => window.scrollBy({ top: 210, behavior: 'smooth' }));
-    await page.waitForTimeout(1200);
     await click(page, page.getByRole('link', { name: /2009 Dodge Challenger SRT/ }));
+    await page.evaluate(() => window.scrollBy({ top: 240, behavior: 'smooth' }));
+    await page.waitForFunction(() => window.scrollY > 0);
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    await page.waitForFunction(() => window.scrollY === 0);
     await page.getByRole('heading', { name: 'Challenger SRT', exact: true }).waitFor();
     await page.waitForTimeout(1700);
     await click(page, page.getByRole('button', { name: 'Edit vehicle' }));

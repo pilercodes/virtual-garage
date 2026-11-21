@@ -35,7 +35,7 @@ jobs:
           mkdir -p videos
           for video in recordings/*.webm; do
             file="videos/$(basename "$video" .webm).mp4"
-            ffmpeg -v error -i "$video" -c:v libx264 -preset fast -crf 19 -pix_fmt yuv420p -movflags +faststart -an "$file"
+            ffmpeg -v error -i "$video" -vf 'scale=1920:1080:flags=lanczos' -c:v libx264 -preset fast -crf 19 -pix_fmt yuv420p -movflags +faststart -an "$file"
             ffprobe -v error -show_entries stream=width,height,codec_type:format=duration -of json "$file" |
               jq -e '(.streams | length) == 1 and .streams[0].codec_type == "video" and .streams[0].width == 1920 and .streams[0].height == 1080 and (.format.duration | tonumber | . >= 20 and . <= 60)'
             ffmpeg -v error -xerror -i "$file" -f null -
