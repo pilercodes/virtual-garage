@@ -20,6 +20,16 @@ export function cleanVehicle(input) {
   return { year, make, model, color };
 }
 
-export function cleanService() {
-  return null;
+export function cleanService(input) {
+  if (!input || typeof input !== 'object') return null;
+  const description = cleanText(input.description, 120, true);
+  const notes = cleanText(input.notes ?? '', 1000);
+  const { date, mileage, cost } = input;
+  const parsed = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(date + 'T00:00:00Z') : null;
+  if (!parsed || Number.isNaN(+parsed) || parsed.toISOString().slice(0, 10) !== date || date < '1886-01-01' ||
+      !Number.isInteger(mileage) || mileage < 0 || mileage > 9999999 ||
+      typeof cost !== 'string' || !/^\d{1,7}(?:\.\d{1,2})?$/.test(cost) ||
+      description === null || notes === null) return null;
+  const [dollars, cents = ''] = cost.split('.');
+  return { description, date, mileage, costCents: Number(dollars) * 100 + Number(cents.padEnd(2, '0')), notes };
 }
