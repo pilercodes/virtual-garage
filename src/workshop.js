@@ -65,12 +65,26 @@ function workshopObjectKey(owner, id) {
   return 'garage/' + owner + '/' + id;
 }
 
+async function workshopCleanFiles(env, owner) {
+  if (!env.BUCKET) return;
+  const { results } = await env.DB.prepare('SELECT id FROM garage_file_cleanup WHERE owner = ? LIMIT 25').bind(owner).all();
+  for (const item of results) {
+    try {
+      await env.BUCKET.delete(workshopObjectKey(owner, item.id));
+      await env.DB.prepare('DELETE FROM garage_file_cleanup WHERE owner = ? AND id = ?').bind(owner, item.id).run();
+    } catch {
+      console.warn('Workshop file cleanup will retry.');
+      break;
+    }
+  }
+}
+
 async function workshopFiles(request, env, url, owner, vehicle, id, helpers) {
   const { json, error, readBody, headers } = helpers;
   const { DB, BUCKET } = env;
   const file = id && await DB.prepare('SELECT * FROM garage_files WHERE owner = ? AND vehicle_id = ? AND id = ?')
     .bind(owner, vehicle, id).first();
-  if (id && !file) return error('File not found.', 404);
+  if (id && (!file || !await workshopTarget(DB, owner, vehicle, file.target))) return error('File not found.', 404);
   if (!id && request.method === 'GET') {
     const { results } = await DB.prepare('SELECT id, name, mime, size, target, detail, position FROM garage_files WHERE owner = ? AND vehicle_id = ? ORDER BY position, id')
       .bind(owner, vehicle).all();
@@ -122,7 +136,6 @@ async function workshopFiles(request, env, url, owner, vehicle, id, helpers) {
     return json({ id });
   }
   if (file && request.method === 'DELETE') {
-    await BUCKET.delete(workshopObjectKey(owner, id));
     await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, id).run();
     return json({ id });
   }
@@ -168,6 +181,17 @@ function workshopRecordData(input) {
   const notes = workshopText(input?.notes);
   if (!title) return null;
   if (input.kind === 'procedure') return { title, notes, steps: workshopSteps(input.steps) };
+  if (input.kind === 'spec') {
+    const fields = {};
+    for (const key of ['vin', 'plate', 'trim', 'engine', 'transmission', 'oil', 'tires', 'battery']) {
+      fields[key] = workshopText(input[key], 500);
+    }
+    const custom = Array.isArray(input.custom) ? input.custom.slice(0, 30).flatMap(field => {
+      const label = workshopText(field?.label, 100);
+      return label ? [{ label, value: workshopText(field.value, 500) }] : [];
+    }) : [];
+    return { ...fields, title, notes, mileage: workshopNumber(input.mileage, 9999999), custom };
+  }
   if (input.kind === 'schedule') {
     const months = workshopNumber(input.months, 120);
     const intervalMiles = workshopNumber(input.intervalMiles, 9999999);
@@ -230,10 +254,10 @@ async function workshopRecords(request, env, owner, vehicle, id, helpers) {
     const targetVehicle = kind === 'procedure' ? '' : vehicle;
     const data = JSON.stringify(item);
     if (!id) {
-      id = crypto.randomUUID();
-      await DB.prepare('INSERT INTO workshop_records (owner, vehicle_id, kind, id, data) VALUES (?, ?, ?, ?, ?)')
+      id = kind === 'spec' ? 'specification' : crypto.randomUUID();
+      const result = await DB.prepare('INSERT INTO workshop_records (owner, vehicle_id, kind, id, data) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING')
         .bind(owner, targetVehicle, kind, id, data).run();
-      return json({ id }, 201);
+      return result.meta.changes ? json({ id }, 201) : error('This record already exists. Reload before editing.', 409);
     }
     const { meta } = await DB.prepare('UPDATE workshop_records SET data = ?, revision = revision + 1 WHERE owner = ? AND vehicle_id = ? AND kind = ? AND id = ? AND revision = ?')
       .bind(data, owner, targetVehicle, kind, id, input.revision ?? -1).run();
@@ -261,13 +285,10 @@ async function workshopRecords(request, env, owner, vehicle, id, helpers) {
       if (linked) return error('Unlink this part from its projects before deleting it.', 409);
     }
     const targets = [row.kind + ':' + id, row.kind + '-warranty:' + id];
-    const { results: attachments } = await DB.prepare('SELECT id FROM garage_files WHERE owner = ? AND vehicle_id = ? AND target IN (?, ?)')
-      .bind(owner, vehicle, ...targets).all();
-    await DB.prepare('DELETE FROM workshop_records WHERE owner = ? AND vehicle_id IN (?, ?) AND id = ?').bind(owner, vehicle, '', id).run();
-    for (const file of attachments) {
-      await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, file.id).run();
-      if (env.BUCKET) await env.BUCKET.delete(workshopObjectKey(owner, file.id)).catch(() => {});
-    }
+    await DB.batch([
+      DB.prepare('DELETE FROM workshop_records WHERE owner = ? AND vehicle_id IN (?, ?) AND id = ?').bind(owner, vehicle, '', id),
+      DB.prepare('DELETE FROM garage_files WHERE owner = ? AND vehicle_id = ? AND target IN (?, ?)').bind(owner, vehicle, ...targets)
+    ]);
     return json({ id });
   }
   return error('Method not allowed.', 405);
@@ -275,7 +296,7 @@ async function workshopRecords(request, env, owner, vehicle, id, helpers) {
 
 async function workshopLogs(request, env, owner, vehicle, id, helpers) {
   const { json, error, readBody } = helpers;
-  const { DB, BUCKET } = env;
+  const { DB } = env;
   if (request.method === 'GET' && !id) {
     const { results } = await DB.prepare('SELECT * FROM maintenance WHERE owner = ? AND vehicle_id = ? ORDER BY date DESC, id')
       .bind(owner, vehicle).all();
@@ -326,7 +347,6 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
     const { results } = await DB.prepare('SELECT id, target FROM garage_files WHERE owner = ? AND vehicle_id = ? AND target LIKE ?')
       .bind(owner, vehicle, 'step:' + id + ':%').all();
     for (const file of results.filter(file => !steps.some(step => file.target === 'step:' + id + ':' + step.id))) {
-      if (BUCKET) await BUCKET.delete(workshopObjectKey(owner, file.id));
       await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, file.id).run();
     }
     return json({ id });
@@ -337,10 +357,6 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
       .bind(owner, vehicle, id).first();
     if (linked) return error('Unlink this activity from its projects before deleting it.', 409);
     const targets = ['log:' + id, 'receipt:' + id, 'warranty:' + id, 'step:' + id + ':%'];
-    const { results } = await DB.prepare('SELECT id FROM garage_files WHERE owner = ? AND vehicle_id = ? AND (target IN (?, ?, ?) OR target LIKE ?)')
-      .bind(owner, vehicle, ...targets).all();
-    if (results.length && !BUCKET) return error('File storage is unavailable.', 503);
-    for (const file of results) await BUCKET.delete(workshopObjectKey(owner, file.id));
     await DB.batch([
       DB.prepare('DELETE FROM maintenance WHERE owner = ? AND vehicle_id = ? AND id = ?').bind(owner, vehicle, id),
       DB.prepare('DELETE FROM garage_files WHERE owner = ? AND vehicle_id = ? AND (target IN (?, ?, ?) OR target LIKE ?)').bind(owner, vehicle, ...targets)
@@ -350,7 +366,22 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
   return error('Method not allowed.', 405);
 }
 
+async function workshopOverview(env, owner, helpers) {
+  const [logs, records] = await Promise.all([
+    env.DB.prepare('SELECT * FROM maintenance WHERE owner = ? ORDER BY date DESC, id').bind(owner).all(),
+    env.DB.prepare("SELECT vehicle_id, id, kind, data FROM workshop_records WHERE owner = ? AND kind != 'procedure'").bind(owner).all()
+  ]);
+  return helpers.json({
+    logs: logs.results.map(row => ({ ...workshopLogRow(row), vehicleId: row.vehicle_id })),
+    records: records.results.map(row => {
+      const data = JSON.parse(row.data);
+      return { ...(row.kind === 'spec' ? { mileage: data.mileage } : data), id: row.id, vehicleId: row.vehicle_id, kind: row.kind };
+    })
+  });
+}
+
 export async function handleWorkshop(request, env, url, access, starter, helpers) {
+  if (url.pathname === '/api/workshop/overview' && request.method === 'GET') return workshopOverview(env, access.id, helpers);
   const match = new RegExp('^/api/workshop/(' + workshopId + ')/(logs|files|records)(?:/(' + workshopId + '))?$').exec(url.pathname);
   if (!match) return helpers.error('Page not found.', 404);
   const [, vehicle, section, id] = match;
@@ -358,7 +389,9 @@ export async function handleWorkshop(request, env, url, access, starter, helpers
   if (!starter.some(item => item.id === vehicle) && !await env.DB.prepare('SELECT id FROM vehicles WHERE owner = ? AND id = ?')
     .bind(owner, vehicle).first()) return helpers.error('Vehicle not found.', 404);
   if (request.method !== 'GET' && request.headers.get('origin') !== url.origin) return helpers.error('Request origin is not allowed.', 403);
-  if (section === 'records') return workshopRecords(request, env, owner, vehicle, id, helpers);
-  if (section === 'files') return workshopFiles(request, env, url, owner, vehicle, id, helpers);
-  return workshopLogs(request, env, owner, vehicle, id, helpers);
+  const result = await (section === 'records' ? workshopRecords(request, env, owner, vehicle, id, helpers) :
+    section === 'files' ? workshopFiles(request, env, url, owner, vehicle, id, helpers) :
+      workshopLogs(request, env, owner, vehicle, id, helpers));
+  if (request.method !== 'GET' && result.ok) await workshopCleanFiles(env, owner).catch(() => {});
+  return result;
 }

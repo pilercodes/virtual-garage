@@ -1,4 +1,4 @@
-import { mountWorkshop, workshopFileUrl } from './workshop-ui.js';
+import { mountWorkshop, mountGarageOverview, workshopFileUrl } from './workshop-ui.js';
 import { setupGarageAccount } from './account-ui.js';
 const byId = id => document.getElementById(id);
 const vehicleList = byId('vehicles');
@@ -88,6 +88,7 @@ function render(focus = false) {
     byId('count').textContent = vehicles.length + ' ' + (vehicles.length === 1 ? 'vehicle' : 'vehicles');
     byId('profile-content').replaceChildren();
     vehicleList.replaceChildren(...vehicles.map(card));
+    mountGarageOverview(byId('garage-overview'), vehicles, api);
     if (focus) byId('garage-title').focus();
   }
   if (focus) window.scrollTo(0, 0);
@@ -184,6 +185,7 @@ await setupGarageAccount(api, async id => {
   vehicles = [];
   viewing = undefined;
   vehicleList.replaceChildren();
+  byId('garage-overview').replaceChildren();
   byId('profile').hidden = true;
   byId('profile-content').replaceChildren();
   byId('garage').hidden = !id;

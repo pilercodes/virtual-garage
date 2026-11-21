@@ -119,3 +119,14 @@ test('projects preserve linked logs and warranties attach to repairs', async t =
   assert.equal((await (await call('records')).json())[0].tasks[0].done, true);
   assert.equal((await (await call('logs')).json())[0].warranty.expires, '2027-06-03');
 });
+
+test('vehicle specifications save unknown mileage and optional custom fields', async t => {
+  const call = await workshopFixture(t);
+  const { id } = await (await call('records', 'POST', { kind: 'spec', title: 'Specifications', mileage: '',
+    custom: [{ label: 'Wheel offset', value: 'Reference only' }] })).json();
+  assert.equal(id, 'specification');
+  assert.equal((await call('records', 'POST', { kind: 'spec', title: 'Duplicate' })).status, 409);
+  const [spec] = await (await call('records')).json();
+  assert.equal(spec.mileage, null);
+  assert.deepEqual(spec.custom, [{ label: 'Wheel offset', value: 'Reference only' }]);
+});

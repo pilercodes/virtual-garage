@@ -36,6 +36,13 @@
       "when": 1795254404000,
       "tag": "0005_workshop_records",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795254405000,
+      "tag": "0006_file_cleanup",
+      "breakpoints": true
     }
   ]
 }

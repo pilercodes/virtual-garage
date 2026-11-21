@@ -1,3 +1,4 @@
+import { workshopCsv, workshopZip } from './workshop-export.js';
 import { expenseSummary, partState, nextService } from './workshop-model.js';
 const logTypes = { maintenance: 'Maintenance', repair: 'Repair', upgrade: 'Upgrade / Modification', inspection: 'Inspection / Diagnosis' };
 const partStatuses = { planned: 'Planned', purchased: 'Purchased', installed: 'Installed', removed: 'Removed', replaced: 'Replaced' };
@@ -76,7 +77,6 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
   let files = [];
   let records = [];
   let tab = 'activity';
-  let disposed = false;
   let partQuery = '';
   const filter = { query: '', type: '', status: '', start: '', end: '', sort: 'date' };
 
@@ -86,7 +86,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
 
   async function refresh() {
     [logs, files, records] = await Promise.all([api(base + 'logs'), api(base + 'files'), api(base + 'records')]);
-    if (!shell.isConnected || disposed) return;
+    if (!shell.isConnected) return;
     updatePhoto(files.find(file => file.target === 'vehicle')?.id);
     render();
   }
@@ -424,7 +424,9 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     const draw = () => {
       const selected = logs.filter(log => (!filter.type || filter.type === log.type) && (!filter.status || filter.status === log.status) &&
         (!filter.start || log.date >= filter.start) && (!filter.end || log.date <= filter.end) &&
-        (log.title + ' ' + log.notes).toLowerCase().includes(filter.query.toLowerCase()));
+        [log.title, log.notes, ...records.filter(part => log.partIds?.includes(part.id)).flatMap(part => [part.title, part.brand, part.number]),
+          ...(log.steps || []).flatMap(step => [step.title, step.instructions]), ...files.filter(file => file.target.includes(':' + log.id)).map(file => file.name)]
+          .join(' ').toLowerCase().includes(filter.query.toLowerCase()));
       if (filter.sort === 'cost') selected.sort((a, b) => b.cost - a.cost);
       if (filter.sort === 'mileage') selected.sort((a, b) => (b.mileage ?? -1) - (a.mileage ?? -1));
       list.replaceChildren(...(selected.length ? selected.map(logCard) : [workshopNode('p', 'No activity entries match.')]));
@@ -646,10 +648,78 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     }
   }
 
+  const specFields = {
+    vin: 'VIN', plate: 'License plate', trim: 'Trim', mileage: 'Current odometer (mi)', engine: 'Engine',
+    transmission: 'Transmission', oil: 'Oil specification and capacity', tires: 'Tire sizes and pressures', battery: 'Battery specification'
+  };
+
+  function showSpecs() {
+    const spec = records.find(record => record.kind === 'spec') || {};
+    contents.append(workshopNode('h2', 'Vehicle specifications'),
+      workshopNode('p', [vehicle.year, vehicle.make, vehicle.model, vehicle.color].filter(Boolean).join(' ')));
+    const details = workshopNode('dl', null, 'workshop-specs');
+    for (const [label, value] of [...Object.entries(specFields).map(([key, name]) => [name, spec[key]]),
+      ...(spec.custom || []).map(field => [field.label, field.value])]) {
+      if (value == null || value === '') continue;
+      details.append(workshopNode('dt', label), workshopNode('dd', value));
+    }
+    contents.append(details, workshopNode('p', spec.notes, 'notes'),
+      workshopButton('Edit specifications', () => edit('Vehicle specifications', form => {
+        for (const [key, label] of Object.entries(specFields)) form.append(workshopField(key, label, spec[key], key === 'mileage' ? 'number' : 'text'));
+        form.append(workshopField('notes', 'Vehicle notes', spec.notes, 'textarea'),
+          workshopField('custom', 'Custom fields (Name: value, one per line)', (spec.custom || []).map(field => field.label + ': ' + field.value).join('
+'), 'textarea'));
+      }, data => saveRecord('spec', spec, {
+        ...data, title: 'Specifications', custom: data.custom.split('
+').filter(line => line.includes(':')).map(line => {
+          const separator = line.indexOf(':');
+          return { label: line.slice(0, separator), value: line.slice(separator + 1) };
+        })
+      })), 'primary'));
+  }
+
+  function showBackup() {
+    const getBackup = () => ({
+      format: 'virtual-garage-vehicle', version: 1, created: new Date().toISOString(), vehicle, activity: logs,
+      records, attachments: files.map(file => ({ ...file, path: 'attachments/' + file.id + '-' + file.name.replace(/[^a-zA-Z0-9._-]/g, '_') }))
+    });
+    const download = (name, blob) => {
+      const link = workshopNode('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    };
+    contents.append(workshopNode('h2', 'Service history and backup'),
+      workshopNode('p', 'Downloads include the vehicle’s related records. The ZIP also includes its stored attachments.'),
+      workshopButton('Download JSON', () => download('garage-' + vehicle.id + '.json',
+        new Blob([JSON.stringify(getBackup(), null, 2)], { type: 'application/json' }))),
+      workshopButton('Download CSV', () => download('service-history.csv', new Blob([workshopCsv(logs)], { type: 'text/csv;charset=utf-8' }))),
+      workshopButton('Download ZIP with attachments', event => run(event.currentTarget, async () => {
+        const backup = getBackup();
+        if (files.reduce((sum, file) => sum + file.size, 0) > 80000000) throw new Error('This vehicle exceeds the 80 MB browser ZIP limit. Download its JSON and individual files.');
+        const entries = [['garage.json', JSON.stringify(backup, null, 2)], ['service-history.csv', workshopCsv(logs)]];
+        for (const file of backup.attachments) {
+          const response = await fetch(url(file.id));
+          if (!response.ok) throw new Error('Unable to download attachment ' + file.name + '.');
+          entries.push([file.path, await response.arrayBuffer()]);
+        }
+        download('garage-' + vehicle.id + '.zip', workshopZip(entries));
+      })),
+      workshopButton('Print service history', () => window.print()));
+    const print = workshopNode('div', null, 'workshop-print');
+    print.append(workshopNode('h2', [vehicle.year, vehicle.make, vehicle.model].join(' ') + ' · Service history'));
+    for (const log of logs) print.append(workshopNode('h3', shortDate(log.date) + ' · ' + log.title),
+      workshopNode('p', [logTypes[log.type], logStatuses[log.status], log.mileage == null ? '' : log.mileage + ' mi', dollars(log.cost)].filter(Boolean).join(' · ')),
+      workshopNode('p', log.notes, 'notes'));
+    if (!logs.length) print.append(workshopNode('p', 'No activity recorded.'));
+    contents.append(print);
+  }
+
   function render() {
     status.textContent = '';
     contents.replaceChildren();
-    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos', procedures: 'Procedures', parts: 'Parts & Modifications', expenses: 'Spending', schedule: 'Maintenance Schedule', projects: 'Projects' }).map(([id, label]) =>
+    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos', procedures: 'Procedures', parts: 'Parts & Modifications', expenses: 'Spending', schedule: 'Maintenance Schedule', projects: 'Projects', specs: 'Specifications', backup: 'Export' }).map(([id, label]) =>
       workshopButton(label, () => { tab = id; render(); }, tab === id ? 'primary' : 'secondary')));
     if (tab === 'photos') contents.append(workshopNode('h2', 'Vehicle photos'), attachments('vehicle'));
     else if (tab === 'procedures') showProcedures();
@@ -657,8 +727,81 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     else if (tab === 'expenses') showExpenses();
     else if (tab === 'schedule') showSchedule();
     else if (tab === 'projects') showProjects();
+    else if (tab === 'specs') showSpecs();
+    else if (tab === 'backup') showBackup();
     else showLogs();
   }
 
-  refresh().catch(error => { if (!disposed) status.textContent = error.message; });
+  refresh().catch(error => { if (shell.isConnected) status.textContent = error.message; });
+}
+
+
+export async function mountGarageOverview(root, vehicles, api) {
+  const shell = workshopNode('div', null, 'garage-summary');
+  root.replaceChildren(shell);
+  if (!vehicles.length) return;
+  try {
+    const { logs, records } = await api('workshop/overview');
+    if (!shell.isConnected) return;
+    const ownerVehicles = new Map(vehicles.map(vehicle => [vehicle.id, vehicle]));
+    const visibleLogs = logs.filter(log => ownerVehicles.has(log.vehicleId));
+    const today = new Date().toISOString().slice(0, 10);
+    const name = id => [ownerVehicles.get(id)?.year, ownerVehicles.get(id)?.model].filter(Boolean).join(' ');
+    const link = (id, label) => {
+      const anchor = workshopNode('a', label);
+      anchor.href = '#vehicle/' + id;
+      return anchor;
+    };
+    const panels = workshopNode('div', null, 'garage-summary-grid');
+    const panel = (title, rows, empty) => {
+      const section = workshopNode('section', null, 'workshop-item');
+      section.append(workshopNode('h3', title));
+      for (const row of rows) {
+        const line = workshopNode('p');
+        line.append(row);
+        section.append(line);
+      }
+      if (!rows.length) section.append(workshopNode('p', empty));
+      panels.append(section);
+    };
+    const reminders = records.filter(item => item.kind === 'schedule' && ownerVehicles.has(item.vehicleId)).flatMap(item => {
+      const current = records.find(spec => spec.kind === 'spec' && spec.vehicleId === item.vehicleId);
+      const due = nextService(item, visibleLogs.filter(log => log.vehicleId === item.vehicleId), current?.mileage, today);
+      return ['Upcoming', 'Overdue'].includes(due.state) ? [link(item.vehicleId, due.state + ' · ' + name(item.vehicleId) + ' · ' + item.title)] : [];
+    });
+    const warranties = [...records, ...visibleLogs].filter(item => ownerVehicles.has(item.vehicleId) && item.warranty?.expires && item.warranty.expires >= today &&
+      (+new Date(item.warranty.expires) - +new Date(today)) / 86400000 <= 60)
+      .sort((a, b) => a.warranty.expires.localeCompare(b.warranty.expires));
+    panel('Maintenance reminders', reminders, 'No upcoming or overdue maintenance.');
+    panel('Active projects', records.filter(item => item.kind === 'project' && item.status !== 'completed' && ownerVehicles.has(item.vehicleId))
+      .slice(0, 6).map(item => link(item.vehicleId, name(item.vehicleId) + ' · ' + item.title)), 'No active projects.');
+    panel('Warranty expirations', warranties.slice(0, 6).map(item => link(item.vehicleId, item.title + ' · ' + shortDate(item.warranty.expires))), 'No warranties expiring in the next 60 days.');
+    panel('Recorded spending', vehicles.map(vehicle => link(vehicle.id, name(vehicle.id) + ' · ' + dollars(expenseSummary(
+      visibleLogs.filter(log => log.vehicleId === vehicle.id), records.filter(part => part.kind === 'part' && part.vehicleId === vehicle.id)).total))), 'No spending.');
+    const search = workshopField('garageSearch', 'Search all vehicle activity and parts', '', 'search');
+    const vehicleFilter = workshopField('vehicle', 'Vehicle', '', 'text', Object.fromEntries([['', 'All vehicles'], ...vehicles.map(vehicle => [vehicle.id, name(vehicle.id)])]));
+    const results = workshopNode('div', null, 'workshop-item');
+    const update = () => {
+      const query = search.lastChild.value.trim().toLowerCase();
+      const id = vehicleFilter.lastChild.value;
+      const items = [...visibleLogs, ...(query ? records.filter(item => item.kind === 'part') : [])].filter(item =>
+        ownerVehicles.has(item.vehicleId) && (!id || id === item.vehicleId) &&
+        [item.title, item.notes, item.number, item.brand, name(item.vehicleId)].join(' ').toLowerCase().includes(query));
+      results.replaceChildren(workshopNode('h3', query ? 'Search results' : 'Recent activity'));
+      for (const item of items.slice(0, 12)) {
+        const row = workshopNode('p');
+        row.append(link(item.vehicleId, name(item.vehicleId) + ' · ' + item.title + (item.date ? ' · ' + shortDate(item.date) : '')));
+        results.append(row);
+      }
+      if (!items.length) results.append(workshopNode('p', 'No matching records.'));
+    };
+    search.lastChild.addEventListener('input', update);
+    vehicleFilter.lastChild.addEventListener('change', update);
+    const filters = workshopNode('div', null, 'workshop-toolbar');
+    filters.append(search, vehicleFilter);
+    shell.append(workshopNode('h2', 'Workshop overview'), panels, filters, results);
+    update();
+  } catch (error) {
+    if (shell.isConnected) shell.textContent = error.message;
+  }
 }
