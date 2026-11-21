@@ -67,7 +67,7 @@ function workshopObjectKey(owner, id) {
 
 async function workshopCleanFiles(env, owner) {
   if (!env.BUCKET) return;
-  const { results } = await env.DB.prepare('SELECT id FROM garage_file_cleanup WHERE owner = ? LIMIT 25').bind(owner).all();
+  const { results } = await env.DB.prepare('SELECT id FROM garage_file_cleanup WHERE owner = ? AND due <= ? LIMIT 25').bind(owner, Date.now()).all();
   for (const item of results) {
     try {
       await env.BUCKET.delete(workshopObjectKey(owner, item.id));
@@ -109,19 +109,19 @@ async function workshopFiles(request, env, url, owner, vehicle, id, helpers) {
     if (!mime || (!/^(receipt|warranty|part-warranty):/.test(target) && !mime.startsWith('image/'))) return error('Upload a JPEG, PNG, WebP, GIF, or PDF up to 10 MB. Vehicle photos must be images.', 400);
     id = crypto.randomUUID();
     const name = workshopText(url.searchParams.get('name'), 180) || ('upload.' + workshopTypes[mime]);
+    await DB.prepare('INSERT INTO garage_file_cleanup (owner, id, due) VALUES (?, ?, ?)')
+      .bind(owner, id, Date.now() + 15 * 60000).run();
     await BUCKET.put(workshopObjectKey(owner, id), bytes);
-    try {
-      const result = await DB.prepare(`INSERT INTO garage_files (owner, vehicle_id, id, target, mime, name, size, position)
+    const [result] = await DB.batch([
+      DB.prepare(`INSERT INTO garage_files (owner, vehicle_id, id, target, mime, name, size, position)
         SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM garage_files WHERE owner = ? AND vehicle_id = ?) < 250`)
-        .bind(owner, vehicle, id, target, mime, name, bytes.byteLength, Date.now(), owner, vehicle).run();
-      if (!result.meta.changes || !await workshopTarget(DB, owner, vehicle, target)) {
-        await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, id).run();
-        await BUCKET.delete(workshopObjectKey(owner, id));
-        return error('Attachment target changed or upload limit was reached.', 409);
-      }
-    } catch (cause) {
-      await BUCKET.delete(workshopObjectKey(owner, id)).catch(() => {});
-      throw cause;
+        .bind(owner, vehicle, id, target, mime, name, bytes.byteLength, Date.now(), owner, vehicle),
+      DB.prepare('DELETE FROM garage_file_cleanup WHERE owner = ? AND id = ? AND EXISTS (SELECT 1 FROM garage_files WHERE owner = ? AND id = ?)')
+        .bind(owner, id, owner, id)
+    ]);
+    if (!result.meta.changes || !await workshopTarget(DB, owner, vehicle, target)) {
+      await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, id).run();
+      return error('Attachment target changed or upload limit was reached.', 409);
     }
     return json({ id }, 201);
   }
