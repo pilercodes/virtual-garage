@@ -1,0 +1,48 @@
+name: Browser recordings
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/recordings.yml'
+      - 'scripts/record.mjs'
+      - 'src/**'
+      - 'migrations/**'
+permissions:
+  contents: read
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-save --package-lock=false playwright@1.58.2
+      - run: npx playwright install --with-deps chromium
+      - name: Record the local application and test mobile
+        env:
+          GARAGE_DB: ":memory:"
+        run: |
+          npm run dev > /tmp/virtual-garage.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true; cat /tmp/virtual-garage.log' EXIT
+          curl --fail --retry 10 --retry-connrefused -sS http://127.0.0.1:3000/ > /dev/null
+          node scripts/record.mjs recordings
+      - name: Install FFmpeg
+        run: sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Encode and verify both clips
+        run: |
+          mkdir -p videos
+          for video in recordings/*.webm; do
+            file="videos/$(basename "$video" .webm).mp4"
+            ffmpeg -v error -i "$video" -vf 'scale=1920:1080:flags=lanczos' -c:v libx264 -preset fast -crf 19 -pix_fmt yuv420p -movflags +faststart -an "$file"
+            ffprobe -v error -show_entries stream=width,height,codec_type:format=duration -of json "$file" |
+              jq -e '(.streams | length) == 1 and .streams[0].codec_type == "video" and .streams[0].width == 1920 and .streams[0].height == 1080 and (.format.duration | tonumber | . >= 20 and . <= 60)'
+            ffmpeg -v error -xerror -i "$file" -f null -
+          done
+          test "$(find videos -name '*.mp4' | wc -l)" -eq 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: virtual-garage-b-roll
+          path: videos/*.mp4
+          retention-days: 14
