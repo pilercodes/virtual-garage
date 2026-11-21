@@ -7,7 +7,7 @@ try {
   const owner = await browser.newPage();
   const guest = await browser.newPage();
   async function register(page, email) {
-    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Email', { exact: true }).fill(email);
     await page.getByLabel('Password', { exact: true }).fill('demo test password 123');
     await page.getByRole('button', { name: 'Create account' }).click();
     await page.getByRole('button', { name: 'Add vehicle' }).waitFor();
