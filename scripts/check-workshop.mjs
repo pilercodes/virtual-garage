@@ -35,6 +35,14 @@ try {
   assert.equal(response.status(), 200);
   assert.deepEqual(await response.body(), photo.buffer);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Delete vehicle' }).click();
+  const card = page.locator('#vehicles').getByRole('link', { name: /Corvette Z06/ });
+  await card.waitFor({ state: 'hidden' });
+  await page.getByText('Removed vehicles', { exact: true }).click();
+  await page.getByRole('button', { name: 'Restore Corvette Z06' }).click();
+  await card.click();
+  await entry.waitFor();
   assert.deepEqual(errors, []);
 } finally {
   await browser.close();

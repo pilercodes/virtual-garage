@@ -142,3 +142,8 @@ dialog input[type=checkbox] { width: 1.25rem; min-height: 1.25rem; accent-color:
 .workshop-toolbar > label { min-width: 0; grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
 .workshop-toolbar > label > :is(input, select), .workshop-content select, dialog select { width: 100%; min-width: 0; }
 .garage-summary, .workshop-content, .workshop-item { min-width: 0; max-width: 100%; }
+
+.danger { color: #ffc5b3; }
+#removed-vehicles { margin-top: 1rem; }
+#removed-vehicles summary { color: var(--accent); cursor: pointer; padding-block: .65rem; }
+#vehicle-action-status { color: #ffb793; }
