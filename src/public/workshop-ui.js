@@ -72,6 +72,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
   const url = (id, download = false) => workshopFileUrl(vehicle.id, id, garage, download);
   let logs = [];
   let files = [];
+  let records = [];
   let tab = 'activity';
   let disposed = false;
   const filter = { query: '', type: '', status: '', start: '', end: '', sort: 'date' };
@@ -81,7 +82,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
   }
 
   async function refresh() {
-    [logs, files] = await Promise.all([api(base + 'logs'), api(base + 'files')]);
+    [logs, files, records] = await Promise.all([api(base + 'logs'), api(base + 'files'), api(base + 'records')]);
     if (!shell.isConnected || disposed) return;
     updatePhoto(files.find(file => file.target === 'vehicle')?.id);
     render();
@@ -181,6 +182,11 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
       workshopButton('Delete', event => {
         if (confirm('Delete this attachment?')) run(event.currentTarget, async () => { await write('files/' + item.id, 'DELETE'); await refresh(); });
       }));
+      const index = items.indexOf(item);
+      if (index > 0) buttons.append(workshopButton('Move earlier', event => run(event.currentTarget, async () => {
+        await write('files/' + item.id, 'PUT', { ...item.detail, position: Math.max(0, items[index - 1].position - 1) });
+        await refresh();
+      })));
       if (images.includes(item) && items[0] !== item && !options.noCover) buttons.append(workshopButton('Make cover', event =>
         run(event.currentTarget, async () => {
           await write('files/' + item.id, 'PUT', { ...item.detail, position: Math.max(0, items[0].position - 1) });
@@ -229,8 +235,117 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
         workshopField('mileage', 'Odometer (mi)', log.mileage, 'number'), workshopField('notes', 'Description and notes', log.notes, 'textarea'),
         workshopField('cost', 'Cost (USD)', log.cost == null ? '' : log.cost / 100, 'number'));
       form.elements.cost.step = '0.01';
+      if (!log.id) form.append(workshopField('procedure', 'Start with a procedure (optional)', '', 'text',
+        Object.fromEntries([['', 'No procedure'], ...records.filter(record => record.kind === 'procedure').map(record => [record.id, record.title])])));
     }, data => write('logs' + (log.id ? '/' + log.id : ''), log.id ? 'PUT' : 'POST',
-      { ...data, cost: dollarsToCents(data.cost), revision: log.revision }));
+      { ...log, ...data, cost: dollarsToCents(data.cost), revision: log.revision,
+        steps: log.steps || (records.find(record => record.id === data.procedure)?.steps || []).map(step => ({ ...step, id: crypto.randomUUID() })) }));
+  }
+
+  function stepEditor(step, save) {
+    edit(step.id ? 'Edit DIY step' : 'Add DIY step', form => {
+      for (const [key, label, type] of [
+        ['title', 'Short title', 'text'], ['instructions', 'Instructions', 'textarea'], ['tools', 'Tools', 'text'],
+        ['materials', 'Materials', 'text'], ['torque', 'Torque specifications', 'text'], ['notes', 'Notes', 'textarea']
+      ]) form.append(workshopField(key, label, step[key], type));
+    }, data => save({ ...data, id: step.id || crypto.randomUUID() }));
+  }
+
+  function guideView(log) {
+    const body = workshopNode('div');
+    body.append(workshopNode('h2', log.title + ' · Work instructions'));
+    for (const [index, step] of (log.steps || []).entries()) {
+      body.append(workshopNode('h3', (index + 1) + '. ' + (step.title || 'Draft step')),
+        workshopNode('p', step.instructions, 'notes'));
+      for (const key of ['tools', 'materials', 'torque', 'notes']) {
+        if (step[key]) body.append(workshopNode('p', key[0].toUpperCase() + key.slice(1) + ' · ' + step[key], 'notes'));
+      }
+      const photos = files.filter(file => file.target === 'step:' + log.id + ':' + step.id);
+      for (const file of photos) {
+        const image = workshopNode('img');
+        image.src = url(file.id);
+        image.alt = file.detail.caption || file.name;
+        body.append(image);
+      }
+    }
+    body.append(workshopButton('Close guide', () => viewer.close()));
+    viewer.setAttribute('aria-label', 'Work instructions');
+    viewer.replaceChildren(body);
+    viewer.showModal();
+  }
+
+  function guide(log) {
+    const area = workshopNode('details');
+    const steps = log.steps || [];
+    const save = (next, guideDraft = log.guideDraft) => write('logs/' + log.id, 'PUT', { ...log, steps: next, guideDraft });
+    const reorder = (from, to, button) => run(button, async () => {
+      const next = [...steps];
+      next.splice(to, 0, next.splice(from, 1)[0]);
+      await save(next); await refresh();
+    });
+    area.append(workshopNode('summary', 'DIY / Work Instructions' + (log.guideDraft ? ' · Draft' : '')),
+      workshopButton('Add step', () => stepEditor({}, step => save([...steps, step], true))));
+    if (steps.length) area.append(workshopButton('Read guide', () => guideView(log)),
+      workshopButton(log.guideDraft ? 'Mark guide ready' : 'Save as draft', event => run(event.currentTarget, async () => {
+        await save(steps, !log.guideDraft); await refresh();
+      })),
+      workshopButton('Save as procedure', () => edit('Save reusable procedure', form => {
+        form.append(workshopField('title', 'Procedure name', log.title));
+      }, data => write('records', 'POST', { ...data, kind: 'procedure', steps }))));
+    let dragFrom;
+    for (const [index, step] of steps.entries()) {
+      const row = workshopNode('article', null, 'workshop-item');
+      row.draggable = true;
+      row.addEventListener('dragstart', event => { dragFrom = index; event.dataTransfer.setData('text/plain', String(index)); });
+      row.addEventListener('dragover', event => event.preventDefault());
+      row.addEventListener('drop', event => {
+        event.preventDefault();
+        if (Number.isInteger(dragFrom) && dragFrom !== index) reorder(dragFrom, index);
+        dragFrom = undefined;
+      });
+      row.append(workshopNode('h3', (index + 1) + '. ' + (step.title || 'Draft step')),
+        workshopNode('p', step.instructions, 'notes'),
+        workshopButton('Edit step', () => stepEditor(step, next => save(steps.map(item => item.id === next.id ? next : item)))),
+        workshopButton('Delete step', event => {
+          if (confirm('Delete this step and its photos?')) run(event.currentTarget, async () => {
+            await save(steps.filter(item => item.id !== step.id)); await refresh();
+          });
+        }));
+      if (index > 0) row.append(workshopButton('Move step up', event => reorder(index, index - 1, event.currentTarget)));
+      if (index < steps.length - 1) row.append(workshopButton('Move step down', event => reorder(index, index + 1, event.currentTarget)));
+      row.append(attachments('step:' + log.id + ':' + step.id, { noCover: true }));
+      area.append(row);
+    }
+    return area;
+  }
+
+  function showProcedures() {
+    contents.append(workshopNode('h2', 'Reusable procedures'));
+    const procedures = records.filter(record => record.kind === 'procedure');
+    if (!procedures.length) contents.append(workshopNode('p', 'Save a DIY guide from a log to reuse its written steps.'));
+    for (const procedure of procedures) {
+      const row = workshopNode('article', null, 'workshop-item');
+      const save = steps => write('records/' + procedure.id, 'PUT', { ...procedure, steps });
+      row.append(workshopNode('h3', procedure.title),
+        workshopButton('Edit name', () => edit('Edit procedure', form => form.append(workshopField('title', 'Procedure name', procedure.title)),
+          data => write('records/' + procedure.id, 'PUT', { ...procedure, ...data }))),
+        workshopButton('Add step', () => stepEditor({}, step => save([...(procedure.steps || []), step]))),
+        workshopButton('Delete procedure', event => {
+          if (confirm('Delete this reusable procedure? Existing logs retain their own steps.')) run(event.currentTarget, async () => {
+            await write('records/' + procedure.id, 'DELETE'); await refresh();
+          });
+        }));
+      for (const [index, step] of (procedure.steps || []).entries()) {
+        const line = workshopNode('div', null, 'account-actions');
+        line.append(workshopNode('span', (index + 1) + '. ' + (step.title || 'Draft step')),
+          workshopButton('Edit step', () => stepEditor(step, next => save(procedure.steps.map(item => item.id === next.id ? next : item)))),
+          workshopButton('Remove step', event => run(event.currentTarget, async () => {
+            await save(procedure.steps.filter(item => item.id !== step.id)); await refresh();
+          })));
+        row.append(line);
+      }
+      contents.append(row);
+    }
   }
 
   function logCard(log) {
@@ -250,13 +365,14 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     const details = workshopNode('details');
     details.append(workshopNode('summary', 'Photos and actions'),
       attachments('log:' + log.id),
+      workshopNode('h3', 'Receipts and documents'), attachments('receipt:' + log.id, { document: true }),
       workshopButton('Edit entry', () => logEditor(log)),
       workshopButton('Delete entry', event => {
         if (confirm('Delete this log entry and its attachments?')) run(event.currentTarget, async () => {
           await write('logs/' + log.id, 'DELETE'); await refresh();
         });
       }));
-    card.append(details);
+    card.append(details, guide(log));
     return card;
   }
 
@@ -288,9 +404,10 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
   function render() {
     status.textContent = '';
     contents.replaceChildren();
-    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos' }).map(([id, label]) =>
+    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos', procedures: 'Procedures' }).map(([id, label]) =>
       workshopButton(label, () => { tab = id; render(); }, tab === id ? 'primary' : 'secondary')));
     if (tab === 'photos') contents.append(workshopNode('h2', 'Vehicle photos'), attachments('vehicle'));
+    else if (tab === 'procedures') showProcedures();
     else showLogs();
   }
 

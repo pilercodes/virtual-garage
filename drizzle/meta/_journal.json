@@ -29,6 +29,13 @@
       "when": 1795254403000,
       "tag": "0004_activity_and_files",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795254404000,
+      "tag": "0005_workshop_records",
+      "breakpoints": true
     }
   ]
 }

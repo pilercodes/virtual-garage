@@ -55,3 +55,20 @@ test('vehicle photos persist, validate format and belong to one garage', async t
   await call('files/' + id, 'DELETE');
   assert.equal((await call('files/' + id)).status, 404);
 });
+
+test('receipts and step photos remain associated and reusable steps are snapshots', async t => {
+  const call = await workshopFixture(t);
+  const step = { id: 'step-one', title: 'Loosen fastener', instructions: 'Support the assembly first.' };
+  const source = { title: 'Demo repair', type: 'repair', date: '2026-06-03', status: 'planned', guideDraft: true, steps: [step] };
+  const { id } = await (await call('logs', 'POST', source)).json();
+  assert.equal((await call('files?target=receipt:' + id, 'POST', new TextEncoder().encode('%PDF-1.7'))).status, 201);
+  assert.equal((await call('files?target=step:' + id + ':step-one', 'POST', Uint8Array.of(255, 216, 255, 224))).status, 201);
+  assert.equal((await call('files?target=step:' + id + ':missing', 'POST', Uint8Array.of(255, 216, 255, 224))).status, 404);
+  const { id: procedure } = await (await call('records', 'POST', { kind: 'procedure', title: 'Repair guide', steps: [step] })).json();
+  await call('records/' + procedure, 'PUT', { kind: 'procedure', revision: 0, title: 'Repair guide', steps: [{ ...step, title: 'Revised' }] });
+  assert.equal((await (await call('logs')).json())[0].steps[0].title, step.title);
+  await call('logs/' + id, 'PUT', { ...source, revision: 0, steps: [] });
+  assert.equal((await (await call('files')).json()).length, 1);
+  await call('logs/' + id, 'DELETE');
+  assert.deepEqual(await (await call('files')).json(), []);
+});
