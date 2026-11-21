@@ -124,6 +124,7 @@ export async function setupGarageAccount(api, selectGarage) {
     event.preventDefault();
     const button = event.submitter;
     if (!button) return;
+    const signedInAccount = account;
     const data = Object.fromEntries(new FormData(recoveryForm));
     const buttons = [...recoveryForm.querySelectorAll('button')];
     for (const item of buttons) item.disabled = true;
@@ -131,7 +132,7 @@ export async function setupGarageAccount(api, selectGarage) {
     generatedCode.value = '';
     action(button, async () => {
       const response = await request(button.value, data);
-      if (!account) return;
+      if (account !== signedInAccount) return;
       byId('recovery-instructions').textContent = button.value === 'assist-recovery'
         ? 'Give this code privately to the verified account holder. It expires in one hour.'
         : 'Save this code now. It is shown only once.';
