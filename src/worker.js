@@ -1,3 +1,4 @@
+import { handleWorkshop } from './workshop.js';
 import { accountGarage, handleAccount } from './accounts.js';
 import { vehicles, cleanVehicle, cleanService } from './model.js';
 
@@ -22,7 +23,7 @@ async function readBody(request) {
       const { value, done } = await reader.read();
       if (done) return JSON.parse(text + decoder.decode());
       size += value.byteLength;
-      if (size > 8192) {
+      if (size > 131072) {
         await reader.cancel();
         return null;
       }
@@ -40,7 +41,7 @@ async function maintenance(request, env, url, user, vehicleId, starter) {
     return error('Vehicle not found.', 404);
   }
   if (request.method === 'GET') {
-    const { results } = await DB.prepare('SELECT id, description, date, mileage, cost_cents AS costCents, notes FROM maintenance WHERE owner = ? AND vehicle_id = ? ORDER BY date DESC, id')
+    const { results } = await DB.prepare("SELECT id, description, date, mileage, cost_cents AS costCents, notes FROM maintenance WHERE owner = ? AND vehicle_id = ? AND entry_type = 'maintenance' ORDER BY date DESC, id")
       .bind(user, vehicleId).all();
     return json(results);
   }
@@ -62,6 +63,7 @@ async function garage(request, env, url) {
   if (access.forbidden) return error('Garage not found.', 404);
   const user = access.id;
   const starter = access.starter ? vehicles : [];
+  if (url.pathname.startsWith('/api/workshop/')) return handleWorkshop(request, env, url, access, starter, { json, error, readBody, headers });
   const route = /^\/api\/vehicles(?:\/([a-z0-9-]{1,60}))?$/.exec(url.pathname);
   if (!route) {
     const serviceRoute = /^\/api\/vehicles\/([a-z0-9-]{1,60})\/maintenance$/.exec(url.pathname);
@@ -73,8 +75,13 @@ async function garage(request, env, url) {
   if (request.method === 'GET' && !vehicleId) {
     const { results } = await DB.prepare('SELECT id, year, make, model, color FROM vehicles WHERE owner = ? ORDER BY position, id').bind(user).all();
     const saved = new Map(results.map(row => [row.id, row]));
+    const { results: photos } = await DB.prepare("SELECT id, vehicle_id FROM garage_files WHERE owner = ? AND target = 'vehicle' ORDER BY position, id")
+      .bind(user).all();
+    const primary = new Map();
+    for (const photo of photos) if (!primary.has(photo.vehicle_id)) primary.set(photo.vehicle_id, photo.id);
     return json([...starter.map(vehicle => saved.get(vehicle.id) ?? vehicle),
-      ...results.filter(row => !starter.some(vehicle => vehicle.id === row.id))]);
+      ...results.filter(row => !starter.some(vehicle => vehicle.id === row.id))]
+      .map(vehicle => primary.has(vehicle.id) ? { ...vehicle, photo: primary.get(vehicle.id) } : vehicle));
   }
   if ((request.method === 'POST' && !vehicleId) || (request.method === 'PUT' && vehicleId)) {
     if (request.headers.get('origin') !== url.origin) return error('Request origin is not allowed.', 403);

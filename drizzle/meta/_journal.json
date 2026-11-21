@@ -22,6 +22,34 @@
       "when": 1795254402000,
       "tag": "0003_garage_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795254403000,
+      "tag": "0004_activity_and_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795254404000,
+      "tag": "0005_workshop_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795254405000,
+      "tag": "0006_file_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795254406000,
+      "tag": "0007_workshop_integrity",
+      "breakpoints": true
     }
   ]
 }

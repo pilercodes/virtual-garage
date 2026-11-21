@@ -1,3 +1,4 @@
+import { mountWorkshop, mountGarageOverview, workshopFileUrl } from './workshop-ui.js';
 import { setupGarageAccount } from './account-ui.js';
 const byId = id => document.getElementById(id);
 const vehicleList = byId('vehicles');
@@ -9,10 +10,6 @@ let vehicles = [];
 let saveEditor;
 let viewing;
 let authenticated = false;
-let maintenanceLoad = 0;
-const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-const number = new Intl.NumberFormat('en-US');
-const dateLabel = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' });
 
 function element(tag, className, value) {
   const node = document.createElement(tag);
@@ -21,13 +18,13 @@ function element(tag, className, value) {
   return node;
 }
 
-async function api(path, options = {}) {
+async function api(path, options = {}, garage = activeGarage) {
   const response = await fetch('/api/' + path, {
     ...options,
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
-      ...(!path.startsWith('account/') && activeGarage ? { 'X-Garage': activeGarage } : {})
+      ...(!path.startsWith('account/') && garage ? { 'X-Garage': garage } : {})
     }
   });
   if (!response.ok) {
@@ -41,6 +38,15 @@ async function api(path, options = {}) {
 
 function setImage(node, vehicle) {
   delete node.dataset.car;
+  node.replaceChildren();
+  if (vehicle.photo) {
+    const photo = element('img', 'vehicle-photo');
+    photo.src = workshopFileUrl(vehicle.id, vehicle.photo, activeGarage);
+    photo.alt = '';
+    photo.loading = 'lazy';
+    node.append(photo);
+    return;
+  }
   const imageVehicles = {
     corvette: [2003, 'Chevrolet', 'Corvette Z06', 'Silver'],
     challenger: [2009, 'Dodge', 'Challenger SRT', 'Hemi Orange'],
@@ -79,60 +85,20 @@ function render(focus = false) {
     renderProfile(viewing);
     if (focus) byId('profile-title').focus();
   } else {
-    maintenanceLoad++;
     byId('count').textContent = vehicles.length + ' ' + (vehicles.length === 1 ? 'vehicle' : 'vehicles');
+    byId('profile-content').replaceChildren();
     vehicleList.replaceChildren(...vehicles.map(card));
+    mountGarageOverview(byId('garage-overview'), vehicles, api);
     if (focus) byId('garage-title').focus();
   }
   if (focus) window.scrollTo(0, 0);
 }
 
-function maintenanceCard(record) {
-  const item = element('article', 'record');
-  const main = element('div');
-  main.append(element('h3', '', record.description));
-  if (record.notes) main.append(element('p', 'notes', record.notes));
-  const detail = element('dl');
-  for (const [label, value] of [
-    ['Date', dateLabel.format(new Date(record.date + 'T00:00:00Z'))],
-    ['Mileage', number.format(record.mileage) + ' mi'],
-    ['Cost', currency.format(record.costCents / 100)]
-  ]) {
-    const group = element('div');
-    group.append(element('dt', '', label), element('dd', '', value));
-    detail.append(group);
-  }
-  item.append(main, detail);
-  return item;
-}
-
-async function renderProfile(vehicle) {
-  const version = ++maintenanceLoad;
-  const list = byId('maintenance-list');
-  const status = byId('maintenance-status');
-  const retry = byId('retry-maintenance');
-  retry.hidden = true;
-  status.textContent = 'Loading maintenance records…';
-  list.replaceChildren();
-  try {
-    const records = await api('vehicles/' + vehicle.id + '/maintenance');
-    if (version !== maintenanceLoad) return;
-    status.textContent = records.length ? number.format(records.length) + (records.length === 1 ? ' record' : ' records') : 'No maintenance records yet.';
-    list.replaceChildren(...records.map(maintenanceCard));
-  } catch (error) {
-    if (version !== maintenanceLoad) return;
-    status.textContent = error.message;
-    retry.hidden = false;
-  }
-}
-
-function maintenanceEditor(vehicle) {
-  openEditor('Add maintenance', 'maintenance-template', 'Save record', async fields => {
-    fields.mileage = Number(fields.mileage);
-    await api('vehicles/' + vehicle.id + '/maintenance', { method: 'POST', body: JSON.stringify(fields) });
-    return () => {
-      if (viewing?.id === vehicle.id) renderProfile(vehicle);
-    };
+function renderProfile(vehicle) {
+  const garage = activeGarage;
+  mountWorkshop(byId('profile-content'), vehicle, activeGarage, (path, options) => api(path, options, garage), photo => {
+    vehicle.photo = photo;
+    if (viewing?.id === vehicle.id) setImage(byId('profile-image'), vehicle);
   });
 }
 
@@ -151,7 +117,7 @@ function vehicleEditor(vehicle) {
     const saved = await api('vehicles' + (vehicle ? '/' + vehicle.id : ''), {
       method: vehicle ? 'PUT' : 'POST', body: JSON.stringify(fields)
     });
-    vehicles = vehicle ? vehicles.map(item => item.id === saved.id ? saved : item) : [...vehicles, saved];
+    vehicles = vehicle ? vehicles.map(item => item.id === saved.id ? { ...item, ...saved } : item) : [...vehicles, saved];
     return () => {
       if (vehicle) render();
       else location.hash = 'vehicle/' + saved.id;
@@ -189,8 +155,6 @@ for (const button of dialog.querySelectorAll('.cancel, .close')) {
 }
 byId('add-vehicle').addEventListener('click', () => vehicleEditor());
 byId('edit-vehicle').addEventListener('click', () => vehicleEditor(viewing));
-byId('add-maintenance').addEventListener('click', () => maintenanceEditor(viewing));
-byId('retry-maintenance').addEventListener('click', () => renderProfile(viewing));
 
 let activeGarage;
 let garageLoad = 0;
@@ -219,12 +183,12 @@ await setupGarageAccount(api, async id => {
   activeGarage = id;
   authenticated = Boolean(id);
   garageLoad++;
-  maintenanceLoad++;
   vehicles = [];
   viewing = undefined;
   vehicleList.replaceChildren();
-  byId('maintenance-list').replaceChildren();
+  byId('garage-overview').replaceChildren();
   byId('profile').hidden = true;
+  byId('profile-content').replaceChildren();
   byId('garage').hidden = !id;
   if (id) {
     garageStatus.hidden = false;

@@ -115,14 +115,14 @@ try {
     await page.waitForTimeout(1800);
     await page.locator('#profile-content').evaluate(section => section.scrollIntoView({ behavior: 'smooth', block: 'end' }));
     await page.waitForTimeout(1100);
-    await click(page, page.getByRole('button', { name: 'Add maintenance' }));
-    await fill(page, 'Service description', 'Demo oil and filter service', true);
+    await click(page, page.getByRole('button', { name: 'Add Log Entry' }));
+    await fill(page, 'Title', 'Demo oil and filter service', true);
     await fill(page, 'Date', '2025-01-15');
-    await fill(page, 'Mileage (mi)', '12345', true);
-    await fill(page, 'Cost (USD)', '74.50', true);
-    await fill(page, 'Notes', 'Demonstration only. Sample values.', true);
+    await fill(page, 'Odometer (mi)', '12345', true);
+    await fill(page, 'Other cost (USD)', '74.50', true);
+    await fill(page, 'Description and notes', 'Demonstration only. Sample values.', true);
     await page.waitForTimeout(2100);
-    await click(page, page.getByRole('button', { name: 'Save record' }));
+    await click(page, page.getByRole('button', { name: 'Save', exact: true }));
     const item = page.getByRole('article').filter({ hasText: 'Demo oil and filter service' });
     await item.waitFor();
     await item.scrollIntoViewIfNeeded();
@@ -139,7 +139,12 @@ try {
     const page = await mobile.newPage();
     await page.goto(url);
     await page.getByRole('link', { name: /2012 Toyota Corolla/ }).waitFor();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+    const dimensions = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      overflow: [...document.querySelectorAll('main *')].filter(node => node.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 8).map(node => node.tagName + '.' + node.className)
+    }));
+    assert.equal(dimensions.width, 390, 'Overflow: ' + dimensions.overflow.join(', '));
     await page.getByRole('button', { name: 'Add vehicle' }).click();
     await page.getByLabel('Year').fill('2010');
     await page.getByLabel('Make').fill('Mazda');

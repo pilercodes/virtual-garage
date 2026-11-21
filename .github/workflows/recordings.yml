@@ -5,6 +5,7 @@ on:
       - '.github/workflows/recordings.yml'
       - 'scripts/record.mjs'
       - 'scripts/check-accounts.mjs'
+      - 'scripts/check-workshop.mjs'
       - 'src/**'
       - 'drizzle/**'
 permissions:
@@ -30,6 +31,7 @@ jobs:
           trap 'kill "$preview_pid" 2>/dev/null || true; cat /tmp/virtual-garage.log' EXIT
           curl --fail --retry 10 --retry-connrefused -sS http://127.0.0.1:3000/ > /dev/null
           node scripts/record.mjs recordings
+          node scripts/check-workshop.mjs
       - name: Verify separate accounts and shared garage in Chromium
         env:
           GARAGE_DB: ":memory:"
