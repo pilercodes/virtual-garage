@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 
@@ -22,13 +23,14 @@ try {
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await entry.getByText('DIY / Work Instructions · Draft', { exact: true }).click();
   const step = entry.getByRole('article').filter({ has: page.getByRole('heading', { name: /Inspect the pads/ }) });
-  const photo = { name: 'test.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64') };
+  const photo = { name: 'test.webp', mimeType: 'image/webp', buffer: await readFile('src/public/vehicles.webp') };
   await step.getByLabel('Upload photos', { exact: true }).setInputFiles(photo);
   await page.getByText('Upload complete.', { exact: true }).waitFor();
   await page.reload();
   await entry.getByText('DIY / Work Instructions · Draft', { exact: true }).click();
-  const preview = step.getByRole('img', { name: 'test.png' });
-  await preview.waitFor();
+  const preview = step.getByRole('img', { name: 'test.webp' });
+  await preview.scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => Array.from(document.images).some(image => image.alt === 'test.webp' && image.naturalWidth > 0));
   const response = await page.request.get(new URL(await preview.getAttribute('src'), page.url()).href);
   assert.equal(response.status(), 200);
   assert.deepEqual(await response.body(), photo.buffer);
