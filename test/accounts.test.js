@@ -67,7 +67,7 @@ test('private legacy import moves only that owner’s records and can run once',
   const cookie = await signup('owner@example.com');
   await DB.prepare('INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?, ?)')
     .bind('authorized-legacy', 'private-car', 2012, 'Demo', 'Legacy', '', 1).run();
-  await DB.prepare('INSERT INTO maintenance VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+  await DB.prepare('INSERT INTO maintenance (owner, vehicle_id, id, description, date, mileage, cost_cents, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .bind('authorized-legacy', 'private-car', 'service', 'Demo service', '2025-01-01', 0, 0, '').run();
   assert.equal((await call('account/import', { cookie, body: {}, legacy: 'authorized-legacy' })).status, 403);
   assert.equal((await call('account/import', { cookie, body: {}, importEnabled: true })).status, 403);

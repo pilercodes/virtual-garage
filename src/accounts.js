@@ -52,7 +52,7 @@ export async function accountGarage(request, env) {
   }
   const account = await activeAccount(request, env.DB);
   if (!account) return null;
-  const id = request.headers.get('x-garage') || account.id;
+  const id = request.headers.get('x-garage') || new URL(request.url).searchParams.get('garage') || account.id;
   const garage = await env.DB.prepare(`SELECT id, starter_vehicles AS starter FROM garage_accounts
     WHERE id = ? AND (id = ? OR EXISTS (SELECT 1 FROM garage_invites WHERE garage_id = garage_accounts.id AND claimed_by = ?))`)
     .bind(id, account.id, account.id).first();

@@ -96,3 +96,28 @@ textarea { resize: vertical; }
 .account-actions label { margin: 0; }
 .account-actions select { min-height: 46px; color: inherit; background: #272524; border: 1px solid #5a514c; padding: 8px; font: inherit; border-radius: 7px; max-width: 100%; }
 #join-form button { margin-block: .75rem; }
+
+.vehicle-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
+.workshop-tabs, .workshop-toolbar { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: 1rem; align-items: end; }
+.workshop-toolbar > label { flex: 1 1 8rem; margin: 0; }
+.workshop-toolbar select, .workshop-content select, dialog select { min-height: 44px; max-width: 100%; color: inherit; background: #161615; border: 1px solid #5a514c; border-radius: 6px; padding: .45rem; font: inherit; }
+.workshop-toolbar { margin-top: 1rem; }
+.workshop-list { display: grid; gap: .75rem; }
+.workshop-item { min-width: 0; padding: .9rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-wrap: anywhere; }
+.workshop-item h3 { margin: .5rem 0; }
+.workshop-item details { margin-top: .6rem; }
+.workshop-item summary { cursor: pointer; color: var(--accent); padding-block: .5rem; }
+.workshop-badge { display: inline-block; border-radius: 5px; padding: .2rem .45rem; color: #171411; background: #ffb18a; font-weight: 700; }
+.workshop-badge.repair { background: #fca5a5; }
+.workshop-badge.upgrade { background: #c7b5fd; }
+.workshop-badge.inspection { background: #a5d9ed; }
+.workshop-files { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .65rem; }
+.workshop-image-button { border: 0; padding: 0; width: 100%; display: block; background: #161615; }
+.workshop-image-button img, .workshop-log-cover { width: 100%; max-height: 18rem; display: block; object-fit: cover; border-radius: 5px; }
+.workshop-log-cover { margin-bottom: .6rem; }
+.workshop-viewer { width: min(96vw, 1200px); }
+.workshop-viewer img { width: 100%; max-height: 70vh; object-fit: contain; display: block; }
+.workshop-status { color: #ffb793; margin-block: .45rem; }
+.workshop-attachments { margin: .65rem 0; }
+.workshop-attachments input[type=file] { max-width: 100%; }
+.workshop-content > .primary { margin-bottom: .55rem; }

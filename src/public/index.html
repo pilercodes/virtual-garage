@@ -70,12 +70,7 @@
           <button class="secondary" id="edit-vehicle" type="button">Edit vehicle</button>
         </div>
       </div>
-      <section id="profile-content" aria-labelledby="maintenance-title">
-        <div class="section-head"><h2 id="maintenance-title">Maintenance log</h2><button type="button" class="primary" id="add-maintenance">Add maintenance</button></div>
-        <p id="maintenance-status" role="status"></p>
-        <button type="button" class="secondary" id="retry-maintenance" hidden>Retry loading records</button>
-        <div id="maintenance-list"></div>
-      </section>
+      <section id="profile-content" aria-label="Vehicle workshop"></section>
     </section>
   </main>
   <footer><span>VIRTUAL GARAGE</span></footer>
@@ -92,14 +87,6 @@
     <label>Make<input name="make" maxlength="60" required></label>
     <label>Model<input name="model" maxlength="80" required></label>
   </template>
-  <template id="maintenance-template">
-    <label>Service description<input name="description" maxlength="120" required></label>
-    <div class="field-row">
-      <label>Date<input name="date" type="date" min="1886-01-01" max="9999-12-31" required></label>
-      <label>Mileage (mi)<input name="mileage" type="number" min="0" max="9999999" step="1" inputmode="numeric" required></label>
-    </div>
-    <label>Cost (USD)<input name="cost" inputmode="decimal" pattern="[0-9]{1,7}([.][0-9]{1,2})?" placeholder="0.00" required></label>
-    <label><span>Notes <small>(optional)</small></span><textarea name="notes" maxlength="1000" rows="3"></textarea></label>
-  </template>
+
 </body>
 </html>
