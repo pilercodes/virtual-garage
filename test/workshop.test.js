@@ -93,3 +93,29 @@ test('parts created in a log remain linked and are not charged again in later wo
   assert.equal((await call('records/' + part.id, 'DELETE')).status, 409);
   assert.equal((await call('logs', 'POST', { ...data, partIds: ['missing'] })).status, 400);
 });
+
+test('combined schedules advance from a completed log and expose unknown mileage', async t => {
+  const call = await workshopFixture(t);
+  const { id } = await (await call('records', 'POST', { kind: 'schedule', title: 'Oil', months: 1, intervalMiles: 5000,
+    lastDate: '2026-01-31', lastMileage: 10000 })).json();
+  const [schedule] = await (await call('records')).json();
+  assert.deepEqual(nextService(schedule, [], null, '2026-02-01'),
+    { dueDate: '2026-02-28', dueMileage: 15000, state: 'Upcoming', mileageUnknown: true });
+  const log = await call('logs', 'POST', { title: 'Oil service', type: 'maintenance', status: 'completed', date: '2026-02-12', mileage: 14900, scheduleId: id });
+  assert.equal(log.status, 201);
+  assert.equal(nextService(schedule, await (await call('logs')).json(), 20000, '2026-02-13').state, 'Overdue');
+  assert.equal((await call('records/' + id, 'DELETE')).status, 409);
+});
+
+test('projects preserve linked logs and warranties attach to repairs', async t => {
+  const call = await workshopFixture(t);
+  const { id } = await (await call('logs', 'POST', { title: 'Repair demo', type: 'repair', status: 'completed', date: '2026-06-03',
+    warranty: { provider: 'Test provider', start: '2026-06-03', expires: '2027-06-03', limit: 12000 } })).json();
+  assert.equal((await call('files?target=warranty:' + id, 'POST', new TextEncoder().encode('%PDF-1.7'))).status, 201);
+  const project = await call('records', 'POST', { kind: 'project', title: 'Workshop plan', status: 'planned',
+    budget: 50000, logIds: [id], tasks: [{ title: 'Measure clearance', done: true }] });
+  assert.equal(project.status, 201);
+  assert.equal((await call('logs/' + id, 'DELETE')).status, 409);
+  assert.equal((await (await call('records')).json())[0].tasks[0].done, true);
+  assert.equal((await (await call('logs')).json())[0].warranty.expires, '2027-06-03');
+});

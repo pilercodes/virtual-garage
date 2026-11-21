@@ -262,14 +262,20 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
       typeField.addEventListener('change', togglePartFields);
       togglePartFields();
       extras.append(newPart);
-      form.append(extras);
+      const schedule = workshopField('scheduleId', 'Linked maintenance schedule', log.scheduleId || '', 'text',
+        Object.fromEntries([['', 'No schedule'], ...records.filter(record => record.kind === 'schedule').map(record => [record.id, record.title])]));
+      const toggleSchedule = () => { schedule.hidden = typeField.value !== 'maintenance'; };
+      typeField.addEventListener('change', toggleSchedule);
+      toggleSchedule();
+      form.append(extras, schedule, warrantyFields(log.warranty));
       for (const name of ['partsCost', 'laborCost', 'newPartPrice']) if (form.elements[name]) form.elements[name].step = '0.01';
       if (!log.id) form.append(workshopField('procedure', 'Start with a procedure (optional)', '', 'text',
         Object.fromEntries([['', 'No procedure'], ...records.filter(record => record.kind === 'procedure').map(record => [record.id, record.title])])));
     }, (data, form) => write('logs' + (log.id ? '/' + log.id : ''), log.id ? 'PUT' : 'POST',
       { ...log, ...data, cost: dollarsToCents(data.cost), revision: log.revision,
         expenses: { parts: dollarsToCents(data.partsCost), labor: dollarsToCents(data.laborCost), misc: dollarsToCents(data.cost) },
-        partIds: new FormData(form).getAll('partIds'),
+        partIds: new FormData(form).getAll('partIds'), warranty: readWarranty(data),
+        scheduleId: data.type === 'maintenance' ? data.scheduleId : '',
         newPart: ['repair', 'upgrade'].includes(data.type) ? { title: data.newPart, brand: data.newPartBrand, number: data.newPartNumber, price: dollarsToCents(data.newPartPrice) } : null,
         steps: log.steps || (records.find(record => record.id === data.procedure)?.steps || []).map(step => ({ ...step, id: crypto.randomUUID() })) }));
   }
@@ -401,6 +407,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     details.append(workshopNode('summary', 'Photos and actions'),
       attachments('log:' + log.id),
       workshopNode('h3', 'Receipts and documents'), attachments('receipt:' + log.id, { document: true }),
+      warrantyView(log.warranty, 'warranty:' + log.id),
       workshopButton('Edit entry', () => logEditor(log)),
       workshopButton('Delete entry', event => {
         if (confirm('Delete this log entry and its attachments?')) run(event.currentTarget, async () => {
@@ -445,9 +452,9 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
       ]) form.append(workshopField(name, title, name === 'price' ? part.price == null ? '' : part.price / 100 : part[name], type));
       form.elements.title.required = true;
       form.elements.price.step = '0.01';
-      form.append(workshopField('status', 'Status', part.status || 'planned', 'text', partStatuses));
+      form.append(workshopField('status', 'Status', part.status || 'planned', 'text', partStatuses), warrantyFields(part.warranty));
     }, data => write('records' + (part.id ? '/' + part.id : ''), part.id ? 'PUT' : 'POST',
-      { ...part, ...data, kind: 'part', price: dollarsToCents(data.price) }));
+      { ...part, ...data, kind: 'part', price: dollarsToCents(data.price), warranty: readWarranty(data) }));
   }
 
   function showParts() {
@@ -468,7 +475,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
         details.append(workshopNode('summary', 'Photos and linked history'), attachments('part:' + part.id));
         for (const log of logs.filter(log => log.partIds?.includes(part.id))) details.append(workshopNode('p',
           shortDate(log.date) + ' · ' + log.title + (log.partAction ? ' · ' + partStatuses[log.partAction] : '')));
-        item.append(details, workshopButton('Edit part', () => partEditor(part)), workshopButton('Delete part', event => {
+        item.append(details, warrantyView(part.warranty, 'part-warranty:' + part.id), workshopButton('Edit part', () => partEditor(part)), workshopButton('Delete part', event => {
           if (confirm('Delete this part? Set its status to Removed if you want to keep its history.')) run(event.currentTarget, async () => {
             await write('records/' + part.id, 'DELETE'); await refresh();
           });
@@ -503,15 +510,153 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     bars('Spending by month', Object.entries(summary.months).sort(([a], [b]) => b.localeCompare(a)));
   }
 
+  function warrantyFields(warranty = {}) {
+    const area = workshopNode('details');
+    area.append(workshopNode('summary', 'Warranty (optional)'),
+      workshopField('warrantyProvider', 'Warranty provider', warranty.provider),
+      workshopField('warrantyStart', 'Warranty start', warranty.start, 'date'),
+      workshopField('warrantyExpires', 'Warranty expiration', warranty.expires, 'date'),
+      workshopField('warrantyLimit', 'Warranty mileage limit', warranty.limit, 'number'));
+    return area;
+  }
+
+  function readWarranty(data) {
+    return { provider: data.warrantyProvider, start: data.warrantyStart, expires: data.warrantyExpires, limit: data.warrantyLimit };
+  }
+
+  function warrantyView(warranty, target) {
+    const area = workshopNode('details');
+    area.append(workshopNode('summary', 'Warranty and documents'));
+    if (warranty) area.append(workshopNode('p', [
+      warranty.provider, warranty.start && 'Started ' + shortDate(warranty.start), warranty.expires && 'Expires ' + shortDate(warranty.expires),
+      warranty.limit == null ? '' : Number(warranty.limit).toLocaleString() + ' mi limit'
+    ].filter(Boolean).join(' · ') || 'No warranty details.'));
+    area.append(attachments(target, { document: true }));
+    return area;
+  }
+
+  function saveRecord(kind, record, data) {
+    return write('records' + (record.id ? '/' + record.id : ''), record.id ? 'PUT' : 'POST', { ...record, ...data, kind });
+  }
+
+  function removeRecord(record, label) {
+    return workshopButton('Delete ' + label, event => {
+      if (confirm('Delete this ' + label + '?')) run(event.currentTarget, async () => {
+        await write('records/' + record.id, 'DELETE'); await refresh();
+      });
+    });
+  }
+
+  function scheduleEditor(schedule = {}) {
+    edit(schedule.id ? 'Edit schedule' : 'Add schedule', form => {
+      form.append(workshopField('title', 'Maintenance task', schedule.title),
+        workshopField('intervalMiles', 'Repeat every (miles)', schedule.intervalMiles, 'number'),
+        workshopField('months', 'Repeat every (months)', schedule.months, 'number'),
+        workshopField('lastDate', 'Last completed date', schedule.lastDate, 'date'),
+        workshopField('lastMileage', 'Last completed odometer', schedule.lastMileage, 'number'),
+        workshopField('notes', 'Notes', schedule.notes, 'textarea'));
+      form.elements.title.required = true;
+    }, data => saveRecord('schedule', schedule, data));
+  }
+
+  function serviceState(schedule) {
+    const info = records.find(record => record.kind === 'spec');
+    return nextService(schedule, logs, info?.mileage, new Date().toISOString().slice(0, 10));
+  }
+
+  function showSchedule() {
+    const schedules = records.filter(record => record.kind === 'schedule');
+    contents.append(workshopButton('Add schedule', () => scheduleEditor(), 'primary'));
+    if (!schedules.length) contents.append(workshopNode('p', 'No maintenance schedules yet.'));
+    for (const schedule of schedules) {
+      const row = workshopNode('article', null, 'workshop-item');
+      const due = serviceState(schedule);
+      row.append(workshopNode('h3', schedule.title), workshopNode('span', due.state, 'workshop-badge'),
+        workshopNode('p', [due.dueDate && 'Due ' + shortDate(due.dueDate),
+          due.dueMileage == null ? '' : 'Due at ' + due.dueMileage.toLocaleString() + ' mi',
+          due.mileageUnknown ? 'Current odometer unknown' : ''].filter(Boolean).join(' · ')),
+        workshopNode('p', schedule.notes, 'notes'),
+        workshopButton('Log maintenance', () => logEditor({ title: schedule.title, type: 'maintenance', scheduleId: schedule.id })),
+        workshopButton('Edit schedule', () => scheduleEditor(schedule)), removeRecord(schedule, 'schedule'));
+      contents.append(row);
+    }
+  }
+
+  function projectEditor(project = {}) {
+    edit(project.id ? 'Edit project' : 'Add project', form => {
+      form.append(workshopField('title', 'Project title', project.title),
+        workshopField('status', 'Status', project.status || 'planned', 'text', logStatuses),
+        workshopField('description', 'Description', project.description, 'textarea'),
+        workshopField('budget', 'Estimated budget (USD)', project.budget == null ? '' : project.budget / 100, 'number'),
+        workshopField('tasks', 'Planned tasks (one per line)', (project.tasks || []).map(task => task.title).join('
+'), 'textarea'),
+        workshopField('notes', 'Progress notes', project.notes, 'textarea'));
+      form.elements.title.required = true;
+      form.elements.budget.step = '0.01';
+      for (const [field, label, items] of [
+        ['logIds', 'Associated activity', logs], ['partIds', 'Parts needed', records.filter(record => record.kind === 'part')]
+      ]) {
+        const group = workshopNode('details');
+        group.append(workshopNode('summary', label));
+        for (const item of items) {
+          const box = workshopNode('input');
+          box.type = 'checkbox'; box.name = field; box.value = item.id; box.checked = project[field]?.includes(item.id) || false;
+          const line = workshopNode('label', item.title);
+          line.append(box); group.append(line);
+        }
+        form.append(group);
+      }
+    }, (data, form) => saveRecord('project', project, {
+      ...data, budget: dollarsToCents(data.budget),
+      tasks: data.tasks.split('
+').filter(title => title.trim()).map(title => ({ title, done: project.tasks?.some(task => task.title === title && task.done) })),
+      logIds: new FormData(form).getAll('logIds'), partIds: new FormData(form).getAll('partIds')
+    }));
+  }
+
+  function showProjects() {
+    const projects = records.filter(record => record.kind === 'project');
+    contents.append(workshopButton('Add project', () => projectEditor(), 'primary'));
+    if (!projects.length) contents.append(workshopNode('p', 'No projects yet.'));
+    for (const project of projects) {
+      const row = workshopNode('article', null, 'workshop-item');
+      const linkedLogs = logs.filter(log => project.logIds?.includes(log.id));
+      const partIds = new Set([...(project.partIds || []), ...linkedLogs.flatMap(log => log.partIds || [])]);
+      const parts = records.filter(record => record.kind === 'part' && partIds.has(record.id));
+      const summary = expenseSummary(linkedLogs, parts);
+      row.append(workshopNode('h3', project.title), workshopNode('p', logStatuses[project.status] + ' · Actual ' + dollars(summary.total) +
+        (project.budget == null ? '' : ' · Budget ' + dollars(project.budget))),
+        workshopNode('p', project.description, 'notes'), workshopNode('p', project.notes, 'notes'));
+      for (const [index, task] of (project.tasks || []).entries()) {
+        const label = workshopNode('label', task.title);
+        const check = workshopNode('input');
+        check.type = 'checkbox'; check.checked = task.done;
+        check.addEventListener('change', () => run(check, async () => {
+          await saveRecord('project', project, { tasks: project.tasks.map((item, i) => i === index ? { ...item, done: check.checked } : item) });
+          await refresh();
+        }));
+        label.append(check); row.append(label);
+      }
+      for (const log of linkedLogs) row.append(workshopNode('p', 'Activity · ' + log.title));
+      for (const part of parts) row.append(workshopNode('p', 'Part · ' + part.title));
+      const photos = workshopNode('details');
+      photos.append(workshopNode('summary', 'Project photos'), attachments('project:' + project.id));
+      row.append(photos, workshopButton('Edit project', () => projectEditor(project)), removeRecord(project, 'project'));
+      contents.append(row);
+    }
+  }
+
   function render() {
     status.textContent = '';
     contents.replaceChildren();
-    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos', procedures: 'Procedures', parts: 'Parts & Modifications', expenses: 'Spending' }).map(([id, label]) =>
+    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos', procedures: 'Procedures', parts: 'Parts & Modifications', expenses: 'Spending', schedule: 'Maintenance Schedule', projects: 'Projects' }).map(([id, label]) =>
       workshopButton(label, () => { tab = id; render(); }, tab === id ? 'primary' : 'secondary')));
     if (tab === 'photos') contents.append(workshopNode('h2', 'Vehicle photos'), attachments('vehicle'));
     else if (tab === 'procedures') showProcedures();
     else if (tab === 'parts') showParts();
     else if (tab === 'expenses') showExpenses();
+    else if (tab === 'schedule') showSchedule();
+    else if (tab === 'projects') showProjects();
     else showLogs();
   }
 

@@ -168,6 +168,22 @@ function workshopRecordData(input) {
   const notes = workshopText(input?.notes);
   if (!title) return null;
   if (input.kind === 'procedure') return { title, notes, steps: workshopSteps(input.steps) };
+  if (input.kind === 'schedule') {
+    const months = workshopNumber(input.months, 120);
+    const intervalMiles = workshopNumber(input.intervalMiles, 9999999);
+    if (!months && !intervalMiles) return null;
+    return { title, notes, months, intervalMiles, lastDate: workshopDate(input.lastDate),
+      lastMileage: workshopNumber(input.lastMileage, 9999999) };
+  }
+  if (input.kind === 'project') {
+    if (!workshopStatuses.includes(input.status)) return null;
+    const tasks = Array.isArray(input.tasks) ? input.tasks.slice(0, 40).flatMap(task => {
+      const label = workshopText(task?.title, 160);
+      return label ? [{ title: label, done: task.done === true }] : [];
+    }) : [];
+    return { title, notes, description: workshopText(input.description), status: input.status, tasks,
+      budget: workshopNumber(input.budget), partIds: workshopIds(input.partIds), logIds: workshopIds(input.logIds) };
+  }
   if (input.kind === 'part') {
     const status = input.status;
     if (!['planned', 'purchased', 'installed', 'removed', 'replaced'].includes(status)) return null;
@@ -202,6 +218,15 @@ async function workshopRecords(request, env, owner, vehicle, id, helpers) {
     const kind = input?.kind;
     const item = workshopRecordData(input);
     if (!item) return error('Check this record’s title and fields.', 400);
+    if (kind === 'project') {
+      if (!await workshopRelated(DB, owner, vehicle, 'part', item.partIds)) return error('A selected part is unavailable.', 400);
+      if (item.logIds.length) {
+        const marks = item.logIds.map(() => '?').join(',');
+        const row = await DB.prepare('SELECT COUNT(*) AS count FROM maintenance WHERE owner = ? AND vehicle_id = ? AND id IN (' + marks + ')')
+          .bind(owner, vehicle, ...item.logIds).first();
+        if (row.count !== item.logIds.length) return error('A selected log is unavailable.', 400);
+      }
+    }
     const targetVehicle = kind === 'procedure' ? '' : vehicle;
     const data = JSON.stringify(item);
     if (!id) {
@@ -224,7 +249,25 @@ async function workshopRecords(request, env, owner, vehicle, id, helpers) {
         .bind(owner, vehicle, id).first();
       if (linked) return error('Unlink this part from its activity records before deleting it. Use Removed to preserve history.', 409);
     }
+    if (row.kind === 'schedule') {
+      const linked = await DB.prepare("SELECT id FROM maintenance WHERE owner = ? AND vehicle_id = ? AND json_extract(details, '$.scheduleId') = ? LIMIT 1")
+        .bind(owner, vehicle, id).first();
+      if (linked) return error('Unlink this schedule from its log entries before deleting it.', 409);
+    }
+    if (row.kind === 'part') {
+      const linked = await DB.prepare(`SELECT id FROM workshop_records WHERE owner = ? AND vehicle_id = ? AND kind = 'project'
+        AND EXISTS (SELECT 1 FROM json_each(workshop_records.data, '$.partIds') WHERE value = ?) LIMIT 1`)
+        .bind(owner, vehicle, id).first();
+      if (linked) return error('Unlink this part from its projects before deleting it.', 409);
+    }
+    const targets = [row.kind + ':' + id, row.kind + '-warranty:' + id];
+    const { results: attachments } = await DB.prepare('SELECT id FROM garage_files WHERE owner = ? AND vehicle_id = ? AND target IN (?, ?)')
+      .bind(owner, vehicle, ...targets).all();
     await DB.prepare('DELETE FROM workshop_records WHERE owner = ? AND vehicle_id IN (?, ?) AND id = ?').bind(owner, vehicle, '', id).run();
+    for (const file of attachments) {
+      await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, file.id).run();
+      if (env.BUCKET) await env.BUCKET.delete(workshopObjectKey(owner, file.id)).catch(() => {});
+    }
     return json({ id });
   }
   return error('Method not allowed.', 405);
@@ -259,9 +302,13 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
     if (newPartId) partIds.push(newPartId);
     const partAction = ['installed', 'removed', 'replaced'].includes(input.partAction) ? input.partAction :
       newPartId ? 'installed' : '';
+    const scheduleId = workshopIds([input.scheduleId])[0] || '';
+    if (scheduleId && (input.type !== 'maintenance' || !await workshopRelated(DB, owner, vehicle, 'schedule', [scheduleId]))) {
+      return error('Select a schedule from this vehicle for maintenance logs.', 400);
+    }
     const steps = workshopSteps(input.steps);
     const details = JSON.stringify({ unknownMileage: mileage === null, steps, guideDraft: input.guideDraft === true,
-      ...(expenses ? { expenses } : {}), partIds, partAction });
+      ...(expenses ? { expenses } : {}), partIds, partAction, scheduleId, warranty: workshopWarranty(input.warranty) });
     const createPart = newPartId && DB.prepare('INSERT INTO workshop_records (owner, vehicle_id, kind, id, data) VALUES (?, ?, ?, ?, ?)')
       .bind(owner, vehicle, 'part', newPartId, JSON.stringify(newPart));
     if (!id) {
@@ -285,6 +332,10 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
     return json({ id });
   }
   if (request.method === 'DELETE' && id) {
+    const linked = await DB.prepare(`SELECT id FROM workshop_records WHERE owner = ? AND vehicle_id = ? AND kind = 'project'
+      AND EXISTS (SELECT 1 FROM json_each(workshop_records.data, '$.logIds') WHERE value = ?) LIMIT 1`)
+      .bind(owner, vehicle, id).first();
+    if (linked) return error('Unlink this activity from its projects before deleting it.', 409);
     const targets = ['log:' + id, 'receipt:' + id, 'warranty:' + id, 'step:' + id + ':%'];
     const { results } = await DB.prepare('SELECT id FROM garage_files WHERE owner = ? AND vehicle_id = ? AND (target IN (?, ?, ?) OR target LIKE ?)')
       .bind(owner, vehicle, ...targets).all();
