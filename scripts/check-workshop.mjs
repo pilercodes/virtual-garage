@@ -43,6 +43,18 @@ try {
   await page.getByRole('button', { name: 'Restore Corvette Z06' }).click();
   await card.click();
   await entry.waitFor();
+  await page.getByRole('link', { name: 'All vehicles' }).click();
+  const corolla = page.locator('#vehicles').getByRole('link', { name: /2012 Toyota Corolla/ });
+  await corolla.click();
+  await page.getByRole('button', { name: 'Edit vehicle' }).click();
+  await page.getByLabel('Color', { exact: false }).fill('Blue');
+  await page.getByRole('button', { name: 'Save vehicle' }).click();
+  await page.getByText('Blue', { exact: true }).waitFor();
+  await page.locator('#profile-image[data-car="corolla"]').waitFor();
+  await page.reload();
+  await page.locator('#profile-image[data-car="corolla"]').waitFor();
+  await page.getByRole('link', { name: 'All vehicles' }).click();
+  await corolla.locator('[data-car="corolla"]').waitFor();
   assert.deepEqual(errors, []);
 } finally {
   await browser.close();
