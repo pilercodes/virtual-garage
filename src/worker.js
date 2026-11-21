@@ -1,3 +1,4 @@
+import { handleReceiptAsset } from './receipt-assets.js';
 import { handleWorkshop } from './workshop.js';
 import { accountGarage, handleAccount } from './accounts.js';
 import { vehicles, cleanVehicle, cleanService } from './model.js';
@@ -5,7 +6,7 @@ import { vehicles, cleanVehicle, cleanService } from './model.js';
 const headers = {
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
-  'Content-Security-Policy': "default-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",
   'Referrer-Policy': 'no-referrer'
 };
 
@@ -137,6 +138,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      if (url.pathname.startsWith('/receipt-assets/v1/')) return await handleReceiptAsset(request, env, url.pathname, headers);
       if (url.pathname.startsWith('/api/account/')) return await handleAccount(request, env, url, { json, error, readBody });
       if (url.pathname.startsWith('/api/')) return await garage(request, env, url);
       const asset = Object.hasOwn(assets, url.pathname) && assets[url.pathname];

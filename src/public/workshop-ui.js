@@ -1,3 +1,4 @@
+import { mountReceiptEditor } from './receipt-editor.js';
 import { workshopCsv, workshopZip } from './workshop-export.js';
 import { expenseSummary, partState, nextService } from './workshop-model.js';
 const logTypes = { maintenance: 'Maintenance', repair: 'Repair', upgrade: 'Upgrade / Modification', inspection: 'Inspection / Diagnosis' };
@@ -228,6 +229,8 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
   }
 
   function logEditor(log = {}) {
+    let receiptEditor;
+    let savedLog;
     edit(log.id ? 'Edit log entry' : 'Add Log Entry', form => {
       const title = workshopField('title', 'Title', log.title);
       title.lastChild.required = true;
@@ -271,13 +274,30 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
       for (const name of ['partsCost', 'laborCost', 'newPartPrice']) if (form.elements[name]) form.elements[name].step = '0.01';
       if (!log.id) form.append(workshopField('procedure', 'Start with a procedure (optional)', '', 'text',
         Object.fromEntries([['', 'No procedure'], ...records.filter(record => record.kind === 'procedure').map(record => [record.id, record.title])])));
-    }, (data, form) => write('logs' + (log.id ? '/' + log.id : ''), log.id ? 'PUT' : 'POST',
+      receiptEditor = mountReceiptEditor(form, !log.id && !log.date);
+    }, async (data, form) => {
+      receiptEditor.assertReady();
+      savedLog ||= await write('logs' + (log.id ? '/' + log.id : ''), log.id ? 'PUT' : 'POST',
       { ...log, ...data, cost: dollarsToCents(data.cost), revision: log.revision,
         expenses: { parts: dollarsToCents(data.partsCost), labor: dollarsToCents(data.laborCost), misc: dollarsToCents(data.cost) },
         partIds: new FormData(form).getAll('partIds'), warranty: readWarranty(data),
         scheduleId: data.type === 'maintenance' ? data.scheduleId : '',
         newPart: ['repair', 'upgrade'].includes(data.type) ? { title: data.newPart, brand: data.newPartBrand, number: data.newPartNumber, price: dollarsToCents(data.newPartPrice) } : null,
-        steps: log.steps || (records.find(record => record.id === data.procedure)?.steps || []).map(step => ({ ...step, id: crypto.randomUUID() })) }));
+        steps: log.steps || (records.find(record => record.id === data.procedure)?.steps || []).map(step => ({ ...step, id: crypto.randomUUID() })) });
+      try {
+        await receiptEditor.uploadAll((id, file, detail) => {
+          const query = new URLSearchParams({ name: file.name, target: 'receipt:' + savedLog.id, uploadId: id });
+          return api(base + 'files?' + query, { method: 'POST', body: file, headers: {
+            'Content-Type': file.type || 'application/octet-stream', 'X-Receipt-Details': encodeURIComponent(JSON.stringify(detail))
+          } });
+        });
+      } catch (error) {
+        receiptEditor.lockLogFields();
+        await refresh().catch(() => {});
+        throw new Error('Log saved. A receipt did not upload. Retry Save or remove the receipt. ' + error.message);
+      }
+      return savedLog;
+    });
   }
 
   function stepEditor(step, save) {
