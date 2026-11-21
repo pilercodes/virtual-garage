@@ -14,9 +14,10 @@ async function workshopFixture(t) {
   t.after(async () => { DB.close(); await rm(path, { recursive: true, force: true }); });
   const origin = 'https://garage.test';
   return async (route, method = 'GET', data, owner = 'owner', bucket = localBucket(path), extraHeaders = {}) => {
-    const binary = data instanceof Uint8Array;
+    const binary = data instanceof Uint8Array || data instanceof ReadableStream;
     return worker.fetch(new Request(origin + '/api/workshop/corvette/' + route, {
       method,
+      ...(data instanceof ReadableStream ? { duplex: 'half' } : {}),
       headers: { origin, 'content-type': binary ? 'application/octet-stream' : 'application/json',
         ...(owner ? { 'oai-authenticated-user-id': owner } : {}), ...extraHeaders },
       body: data === undefined ? undefined : binary ? data : JSON.stringify(data)
@@ -147,4 +148,35 @@ test('receipt metadata is saved once without charging the log', async t => {
   assert.equal(list.length, 1);
   assert.deepEqual(list[0].detail, detail);
   assert.equal((await (await call('logs')).json())[0].cost, 1200);
+});
+
+test('a slow repeat of an upload cannot overwrite a receipt that just committed', async t => {
+  const call = await workshopFixture(t);
+  const { id } = await (await call('logs', 'POST', {
+    title: 'Receipt retry', type: 'repair', status: 'completed', date: '2026-05-04'
+  })).json();
+  const uploadId = crypto.randomUUID();
+  const route = 'files?target=receipt:' + id + '&uploadId=' + uploadId;
+  const first = new TextEncoder().encode('%PDF-1.7 original receipt');
+  let unblock;
+  let reading;
+  const started = new Promise(resolve => { reading = resolve; });
+  const gate = new Promise(resolve => { unblock = resolve; });
+  const delayed = new ReadableStream({
+    async pull(controller) {
+      reading();
+      await gate;
+      controller.enqueue(new TextEncoder().encode('%PDF-1.7 different bytes'));
+      controller.close();
+    }
+  }, { highWaterMark: 0 });
+  const repeat = call(route, 'POST', delayed);
+  await started;
+  try {
+    assert.equal((await call(route, 'POST', first)).status, 201);
+  } finally {
+    unblock();
+  }
+  assert.equal((await repeat).status, 200);
+  assert.deepEqual(new Uint8Array(await (await call('files/' + uploadId)).arrayBuffer()), first);
 });

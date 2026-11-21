@@ -128,9 +128,14 @@ async function workshopFiles(request, env, url, owner, vehicle, id, helpers) {
     if (!mime || (!/^(receipt|warranty|part-warranty):/.test(target) && !mime.startsWith('image/'))) return error('Upload a JPEG, PNG, WebP, GIF, or PDF up to 10 MB. Vehicle photos must be images.', 400);
     id = uploadId || crypto.randomUUID();
     const name = workshopText(url.searchParams.get('name'), 180) || ('upload.' + workshopTypes[mime]);
-    const intent = await DB.prepare('INSERT INTO garage_file_cleanup (owner, id, due) VALUES (?, ?, ?) ON CONFLICT DO NOTHING')
-      .bind(owner, id, Date.now() + 15 * 60000).run();
-    if (!intent.meta.changes) return error('This upload is still pending. Try again shortly or reselect the receipt.', 409);
+    const intent = await DB.prepare(`INSERT INTO garage_file_cleanup (owner, id, due)
+      SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM garage_files WHERE owner = ? AND id = ?)
+      ON CONFLICT DO NOTHING`).bind(owner, id, Date.now() + 15 * 60000, owner, id).run();
+    if (!intent.meta.changes) {
+      const existing = await DB.prepare('SELECT vehicle_id, target FROM garage_files WHERE owner = ? AND id = ?').bind(owner, id).first();
+      if (uploadId && existing?.vehicle_id === vehicle && existing.target === target) return json({ id });
+      return error('This upload is pending or its identifier is in use. Retry shortly or reselect the receipt.', 409);
+    }
     try {
       await BUCKET.put(workshopObjectKey(owner, id), bytes);
     } catch (cause) {
