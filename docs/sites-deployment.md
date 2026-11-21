@@ -18,3 +18,13 @@ Use the Sites connector and source workflow to register the project once, save a
 ### Resume prompt
 
 > Continue Virtual Garage from pilercodes/virtual-garage after its required GitHub reviews and checks pass. Use only the approved main commit as application source. Open the Sites skill's repository workflow, register or reopen the same private Virtual Garage Site, verify Worker artifact and D1 migration compatibility, and deploy privately. Record the exact SHA, Site ID, version and URL. Verify owner sign-in and persistence across sessions, then run the same-Site update proof from a subsequent reviewed GitHub release. Do not generate another application from the description.
+
+## Initial private deployment
+
+- Live owner-only URL: https://virtual-garage.shawnhogan84.chatgpt.site
+- Sites project: `appgprj_6b01de1e1d148191bb842cb4d38b147c`
+- GitHub application source: `19f0d0f` (merged PR #1)
+- Sites source: `e4e346088981af73fc0155dcbddb9f3f4d850061` (same application files plus the Sites project ID)
+- Sites version: `appgprj_6b01de1e1d148191bb842cb4d38b147c~appgver_8ee8374585e8819181c7defee1fac5db`
+
+Sites returned a successful private deployment, and the hosted URL showed the ChatGPT sign-in gate. The Sites database inspection returned the declared DB binding with no tables. Repackaging under the same SHA reused the existing saved version. The next release needs a fresh approved source commit with the tracked Drizzle migration layout. Verify both tables on the hosted binding before testing writes or reporting the app ready.
