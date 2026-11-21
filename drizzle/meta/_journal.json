@@ -57,6 +57,13 @@
       "when": 1795254407000,
       "tag": "0008_vehicle_archive",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795254408000,
+      "tag": "0009_account_recovery",
+      "breakpoints": true
     }
   ]
 }
