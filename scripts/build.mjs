@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 
 const assets = {
@@ -12,7 +14,9 @@ const assets = {
 };
 const contents = {};
 for (const [route, [file, type]] of Object.entries(assets)) {
-  contents[route] = { type, body: (await readFile(new URL('../src/public/' + file, import.meta.url))).toString('base64') };
+  const source = new URL('../src/public/' + file, import.meta.url);
+  if (type.startsWith('text/javascript')) execFileSync(process.execPath, ['--check', fileURLToPath(source)], { stdio: 'inherit' });
+  contents[route] = { type, body: (await readFile(source)).toString('base64') };
 }
 const worker = await readFile(new URL('../src/worker.js', import.meta.url), 'utf8');
 const model = await readFile(new URL('../src/model.js', import.meta.url), 'utf8');

@@ -590,8 +590,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
         workshopField('status', 'Status', project.status || 'planned', 'text', logStatuses),
         workshopField('description', 'Description', project.description, 'textarea'),
         workshopField('budget', 'Estimated budget (USD)', project.budget == null ? '' : project.budget / 100, 'number'),
-        workshopField('tasks', 'Planned tasks (one per line)', (project.tasks || []).map(task => task.title).join('
-'), 'textarea'),
+        workshopField('tasks', 'Planned tasks (one per line)', (project.tasks || []).map(task => task.title).join('\n'), 'textarea'),
         workshopField('notes', 'Progress notes', project.notes, 'textarea'));
       form.elements.title.required = true;
       form.elements.budget.step = '0.01';
@@ -610,8 +609,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
       }
     }, (data, form) => saveRecord('project', project, {
       ...data, budget: dollarsToCents(data.budget),
-      tasks: data.tasks.split('
-').filter(title => title.trim()).map(title => ({ title, done: project.tasks?.some(task => task.title === title && task.done) })),
+      tasks: data.tasks.split('\n').filter(title => title.trim()).map(title => ({ title, done: project.tasks?.some(task => task.title === title && task.done) })),
       logIds: new FormData(form).getAll('logIds'), partIds: new FormData(form).getAll('partIds')
     }));
   }
@@ -667,11 +665,9 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
       workshopButton('Edit specifications', () => edit('Vehicle specifications', form => {
         for (const [key, label] of Object.entries(specFields)) form.append(workshopField(key, label, spec[key], key === 'mileage' ? 'number' : 'text'));
         form.append(workshopField('notes', 'Vehicle notes', spec.notes, 'textarea'),
-          workshopField('custom', 'Custom fields (Name: value, one per line)', (spec.custom || []).map(field => field.label + ': ' + field.value).join('
-'), 'textarea'));
+          workshopField('custom', 'Custom fields (Name: value, one per line)', (spec.custom || []).map(field => field.label + ': ' + field.value).join('\n'), 'textarea'));
       }, data => saveRecord('spec', spec, {
-        ...data, title: 'Specifications', custom: data.custom.split('
-').filter(line => line.includes(':')).map(line => {
+        ...data, title: 'Specifications', custom: data.custom.split('\n').filter(line => line.includes(':')).map(line => {
           const separator = line.indexOf(':');
           return { label: line.slice(0, separator), value: line.slice(separator + 1) };
         })
