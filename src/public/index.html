@@ -28,6 +28,16 @@
           <button class="secondary" type="submit" value="signup">Create account</button>
         </div>
       </form>
+      <details id="password-reset">
+        <summary>Forgot password?</summary>
+        <p>Use your saved recovery code. If you never made one, contact the garage owner for help.</p>
+        <form id="password-reset-form">
+          <label>Account email<input name="email" type="email" autocomplete="username" maxlength="254" required></label>
+          <label>Recovery code<input name="code" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="50" required></label>
+          <label>New password<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></label>
+          <button class="primary" type="submit">Reset password</button>
+        </form>
+      </details>
     </section>
     <div id="garage-tools" hidden>
       <div class="account-actions">
@@ -35,6 +45,18 @@
         <button class="secondary" id="sharing-button" type="button">Sharing</button>
         <button class="secondary" id="sign-out" type="button">Sign out</button>
       </div>
+      <details id="account-recovery" class="account-panel">
+        <summary>Account security</summary>
+        <p>Save a recovery code in your password manager. Creating a new code replaces the previous one.</p>
+        <form id="recovery-form">
+          <label>Current password<input name="password" type="password" autocomplete="current-password" minlength="12" maxlength="128" required></label>
+          <div class="account-actions">
+            <button class="secondary" type="submit" value="recovery-code">Create my recovery code</button>
+            <button class="secondary" id="assist-recovery" type="submit" value="assist-recovery" hidden>Issue assisted reset code</button>
+          </div>
+        </form>
+        <label id="recovery-result" hidden><span id="recovery-instructions"></span><input id="generated-recovery-code" readonly autocomplete="off" spellcheck="false"></label>
+      </details>
       <button class="secondary" id="import-garage" type="button" hidden>Bring over my existing garage</button>
       <section class="account-panel" id="sharing-panel" hidden aria-labelledby="sharing-title">
         <h2 id="sharing-title">Share my garage</h2>

@@ -4,6 +4,10 @@ export async function setupGarageAccount(api, selectGarage) {
   const picker = byId('garage-picker');
   const sharing = byId('sharing-panel');
   const credentials = byId('account-form');
+  const resetForm = byId('password-reset-form');
+  const recoveryForm = byId('recovery-form');
+  const recoveryResult = byId('recovery-result');
+  const generatedCode = byId('generated-recovery-code');
   let account;
   let inviteToken = new URLSearchParams(location.hash.slice(1)).get('invite');
   if (inviteToken) history.replaceState(null, '', location.pathname);
@@ -58,9 +62,14 @@ export async function setupGarageAccount(api, selectGarage) {
     byId('account-panel').hidden = Boolean(account);
     byId('garage-tools').hidden = !account || account.preview;
     byId('import-garage').hidden = !account?.canImport;
+    byId('assist-recovery').hidden = !account?.canAssistRecovery;
     if (!account) {
       currentGarage = undefined;
       sharing.hidden = true;
+      byId('account-recovery').open = false;
+      recoveryForm.reset();
+      recoveryResult.hidden = true;
+      generatedCode.value = '';
       await selectGarage(null);
       if (inviteToken) status.textContent = 'Sign in or create an account to join the shared garage.';
       return;
@@ -97,6 +106,41 @@ export async function setupGarageAccount(api, selectGarage) {
       await refresh();
     }).finally(() => {
       for (const item of credentials.querySelectorAll('button')) item.disabled = false;
+    });
+  });
+  resetForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(resetForm));
+    action(event.submitter, async () => {
+      await request('reset-password', data);
+      resetForm.reset();
+      byId('password-reset').open = false;
+      credentials.elements.email.value = data.email;
+      credentials.elements.password.focus();
+      status.textContent = 'Password reset. Sign in with the new password, then save a fresh recovery code.';
+    });
+  });
+  recoveryForm.addEventListener('submit', event => {
+    event.preventDefault();
+    const button = event.submitter;
+    if (!button) return;
+    const data = Object.fromEntries(new FormData(recoveryForm));
+    const buttons = [...recoveryForm.querySelectorAll('button')];
+    for (const item of buttons) item.disabled = true;
+    recoveryResult.hidden = true;
+    generatedCode.value = '';
+    action(button, async () => {
+      const response = await request(button.value, data);
+      if (!account) return;
+      byId('recovery-instructions').textContent = button.value === 'assist-recovery'
+        ? 'Give this code privately to the verified account holder. It expires in one hour.'
+        : 'Save this code now. It is shown only once.';
+      generatedCode.value = response.code;
+      recoveryResult.hidden = false;
+      generatedCode.select();
+    }).finally(() => {
+      recoveryForm.reset();
+      for (const item of buttons) item.disabled = false;
     });
   });
   picker.addEventListener('change', async () => {

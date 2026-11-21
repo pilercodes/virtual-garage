@@ -68,6 +68,82 @@ async function allowAccountAttempt(db, key, limit) {
   return attempts <= limit;
 }
 
+function accountEmail(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function validAccountEmail(email) {
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function validAccountPassword(password) {
+  return typeof password === 'string' && password.length >= 12 && password.length <= 128;
+}
+
+async function recoveryOwner(db, account, env) {
+  return Boolean(env.RECOVERY_ASSIST_EMAIL && await db.prepare('SELECT 1 FROM garage_legacy_claims WHERE account_id = ?')
+    .bind(account.id).first());
+}
+
+async function resetGaragePassword(request, db, { json, error, readBody }) {
+  const data = await readBody(request);
+  const email = accountEmail(data?.email);
+  const password = data?.password;
+  const code = typeof data?.code === 'string' ? data.code.trim().toLowerCase().replaceAll('-', '') : '';
+  if (!validAccountEmail(email) || !validAccountPassword(password) || !/^[a-f0-9]{32}$/.test(code)) {
+    return error('Enter your email, a valid recovery code, and a new password of 12 to 128 characters.', 400);
+  }
+  const window = Math.floor(Date.now() / 900000);
+  await db.prepare('DELETE FROM garage_rate_limits WHERE window < ?').bind(window - 1).run();
+  const ip = request.headers.get('cf-connecting-ip');
+  if (!await allowAccountAttempt(db, 'reset:global', 200) ||
+      (ip && !await allowAccountAttempt(db, 'reset:ip:' + await accountHash(ip), 30)) ||
+      !await allowAccountAttempt(db, 'reset:email:' + await accountHash(email), 10)) {
+    return error('Too many attempts. Try again in 15 minutes.', 429);
+  }
+  const hash = await accountHash(code);
+  const eligible = await db.prepare(`SELECT id FROM garage_accounts WHERE email = ? AND
+    (recovery_hash = ? OR (assisted_recovery_hash = ? AND assisted_recovery_expires > ?))`)
+    .bind(email, hash, hash, Date.now()).first();
+  if (!eligible) return error('Email or recovery code is incorrect, used, or expired.', 401);
+  const salt = accountRandom(16);
+  const verifier = await passwordVerifier(password, salt);
+  const { meta } = await db.prepare(`UPDATE garage_accounts SET salt = ?, verifier = ?, recovery_hash = NULL,
+    assisted_recovery_hash = NULL, assisted_recovery_expires = NULL WHERE id = ? AND
+    (recovery_hash = ? OR (assisted_recovery_hash = ? AND assisted_recovery_expires > ?))`)
+    .bind(salt, verifier, eligible.id, hash, hash, Date.now()).run();
+  if (!meta.changes) return error('Email or recovery code is incorrect, used, or expired.', 401);
+  return accountResponse(json({ ok: true }), '', 0);
+}
+
+async function issueRecoveryCode(request, db, env, account, assisted, { json, error, readBody }) {
+  if (assisted && !await recoveryOwner(db, account, env)) return error('Assisted recovery is unavailable.', 403);
+  const data = await readBody(request);
+  if (!validAccountPassword(data?.password)) return error('Enter your current password.', 400);
+  if (!await allowAccountAttempt(db, 'recovery-issue:' + account.id, 10)) {
+    return error('Too many attempts. Try again in 15 minutes.', 429);
+  }
+  const row = await db.prepare('SELECT salt, verifier FROM garage_accounts WHERE id = ?').bind(account.id).first();
+  if (!row || !accountEqual(await passwordVerifier(data.password, row.salt), row.verifier)) {
+    return error('Current password is incorrect.', 401);
+  }
+  const code = accountRandom(16);
+  const hash = await accountHash(code);
+  const sessionHash = await accountHash(accountSessionToken(request));
+  const sessionCheck = `EXISTS (SELECT 1 FROM garage_sessions WHERE account_id = ? AND token_hash = ? AND expires > ?)
+    AND EXISTS (SELECT 1 FROM garage_accounts WHERE id = ? AND verifier = ?)`;
+  const now = Date.now();
+  const sessionValues = [account.id, sessionHash, now, account.id, row.verifier];
+  const { meta } = assisted
+    ? await db.prepare(`UPDATE garage_accounts SET assisted_recovery_hash = ?, assisted_recovery_expires = ?
+      WHERE email = ? AND id != ? AND ${sessionCheck}`)
+      .bind(hash, now + 3600000, accountEmail(env.RECOVERY_ASSIST_EMAIL), account.id, ...sessionValues).run()
+    : await db.prepare(`UPDATE garage_accounts SET recovery_hash = ? WHERE id = ? AND ${sessionCheck}`)
+      .bind(hash, account.id, ...sessionValues).run();
+  if (!meta.changes) return error(assisted ? 'Could not issue a code for the configured account.' : 'Sign in again to create a recovery code.', 409);
+  return json({ code: code.match(/.{1,8}/g).join('-') }, 201);
+}
+
 export async function handleAccount(request, env, url, { json, error, readBody }) {
   const { DB } = env;
   const action = url.pathname.slice('/api/account/'.length);
@@ -78,12 +154,12 @@ export async function handleAccount(request, env, url, { json, error, readBody }
     return error('Request method or origin is not allowed.', 403);
   }
 
+  if (request.method === 'POST' && action === 'reset-password') return resetGaragePassword(request, DB, { json, error, readBody });
   if (request.method === 'POST' && (action === 'signup' || action === 'login')) {
     const data = await readBody(request);
-    const email = typeof data?.email === 'string' ? data.email.trim().toLowerCase() : '';
+    const email = accountEmail(data?.email);
     const password = data?.password;
-    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-        typeof password !== 'string' || password.length < 12 || password.length > 128) {
+    if (!validAccountEmail(email) || !validAccountPassword(password)) {
       return error('Enter an email and a password of 12 to 128 characters.', 400);
     }
     const window = Math.floor(Date.now() / 900000);
@@ -95,10 +171,12 @@ export async function handleAccount(request, env, url, { json, error, readBody }
       return error('Too many attempts. Try again in 15 minutes.', 429);
     }
     let id;
+    let authenticatedVerifier;
     if (action === 'signup') {
       id = crypto.randomUUID();
       const salt = accountRandom(16);
       const verifier = await passwordVerifier(password, salt);
+      authenticatedVerifier = verifier;
       const result = await DB.prepare('INSERT INTO garage_accounts (id, email, salt, verifier) VALUES (?, ?, ?, ?) ON CONFLICT(email) DO NOTHING')
         .bind(id, email, salt, verifier).run();
       if (!result.meta.changes) return error('Unable to create this account. Try signing in.', 409);
@@ -107,21 +185,29 @@ export async function handleAccount(request, env, url, { json, error, readBody }
       const verifier = await passwordVerifier(password, row?.salt || '00000000000000000000000000000000');
       if (!row || !accountEqual(verifier, row.verifier)) return error('Email or password is incorrect.', 401);
       id = row.id;
+      authenticatedVerifier = row.verifier;
     }
     const token = accountRandom();
     await DB.prepare('DELETE FROM garage_sessions WHERE expires <= ?').bind(Date.now()).run();
-    await DB.prepare('INSERT INTO garage_sessions VALUES (?, ?, ?)').bind(await accountHash(token), id, Date.now() + sessionMaxAge * 1000).run();
+    const session = await DB.prepare(`INSERT INTO garage_sessions (token_hash, account_id, expires)
+      SELECT ?, id, ? FROM garage_accounts WHERE id = ? AND verifier = ?`)
+      .bind(await accountHash(token), Date.now() + sessionMaxAge * 1000, id, authenticatedVerifier).run();
+    if (!session.meta.changes) return error('Sign in again with your current password.', 401);
     return accountResponse(json({ ok: true }, action === 'signup' ? 201 : 200), token, sessionMaxAge);
   }
 
   const account = await activeAccount(request, DB);
   if (!account) return error('Sign in to open your garage.', 401);
+  if (request.method === 'POST' && (action === 'recovery-code' || action === 'assist-recovery')) {
+    return issueRecoveryCode(request, DB, env, account, action === 'assist-recovery', { json, error, readBody });
+  }
   if (request.method === 'GET' && action === 'me') {
     const { results } = await DB.prepare(`SELECT id, email FROM garage_accounts WHERE id = ? OR EXISTS
       (SELECT 1 FROM garage_invites WHERE garage_id = garage_accounts.id AND claimed_by = ?)
       ORDER BY id != ?, email`).bind(account.id, account.id, account.id).all();
     return json({
       email: results[0].email,
+      canAssistRecovery: await recoveryOwner(DB, account, env),
       garages: results.map(row => ({ id: row.id, owner: row.id === account.id, label: row.id === account.id ? 'My garage' : 'Shared garage (' + row.email + ')' })),
       canImport: env.LEGACY_IMPORT_ENABLED === 'true' && Boolean(request.headers.get('oai-authenticated-user-id'))
     });

@@ -147,3 +147,7 @@ dialog input[type=checkbox] { width: 1.25rem; min-height: 1.25rem; accent-color:
 #removed-vehicles { margin-top: 1rem; }
 #removed-vehicles summary { color: var(--accent); cursor: pointer; padding-block: .65rem; }
 #vehicle-action-status { color: #ffb793; }
+
+#password-reset, #account-recovery { margin-top: .9rem; }
+#password-reset summary, #account-recovery summary { color: var(--accent); cursor: pointer; padding-block: .5rem; }
+#password-reset-form button { margin-top: .75rem; }

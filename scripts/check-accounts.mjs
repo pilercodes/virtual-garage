@@ -30,9 +30,25 @@ try {
   await guest.locator('#vehicles').getByRole('link', { name: /Shared vehicle/ }).waitFor();
   await guest.getByLabel('Garage', { exact: true }).selectOption({ label: 'My garage' });
   await guest.getByText('0 vehicles', { exact: true }).waitFor();
+  await guest.getByText('Account security', { exact: true }).click();
+  await guest.getByLabel('Current password', { exact: true }).fill('demo test password 123');
+  await guest.getByRole('button', { name: 'Create my recovery code' }).click();
+  const recovery = guest.locator('#generated-recovery-code');
+  await recovery.waitFor();
+  const code = await recovery.inputValue();
   await guest.getByRole('button', { name: 'Sign out' }).click();
   await guest.getByRole('button', { name: 'Sign in' }).waitFor();
   assert.equal(await guest.getByRole('link', { name: /Shared vehicle/ }).count(), 0);
+  await guest.getByText('Forgot password?', { exact: true }).click();
+  await guest.getByLabel('Account email').fill('guest@example.test');
+  await guest.getByLabel('Recovery code', { exact: true }).fill(code);
+  await guest.getByLabel('New password', { exact: true }).fill('replacement demo password');
+  await guest.getByRole('button', { name: 'Reset password' }).click();
+  await guest.getByText(/Password reset\. Sign in/).waitFor();
+  await guest.getByLabel('Password', { exact: true }).fill('replacement demo password');
+  await guest.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await guest.getByLabel('Garage', { exact: true }).selectOption({ label: 'Shared garage (owner@example.test)' });
+  await guest.locator('#vehicles').getByRole('link', { name: /Shared vehicle/ }).waitFor();
 } finally {
   await browser.close();
 }
