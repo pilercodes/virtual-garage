@@ -15,3 +15,5 @@ The [controlled PR](https://github.com/pilercodes/virtual-garage/pull/2) reporte
 The hosted Sites connector listed projects successfully. Its version API requires the exact active commit of the Site's configured source branch. The cloud lacks the Sites source helper on disk and the managed preview was denied a loopback bind. Keep the handoff tied to the authoritative Git SHA and test the package in a Sites-enabled Work task when the reviewed main branch is ready. GitHub Actions supplies the real Chromium runner.
 
 The first recording job revealed that `ubuntu-latest` had moved to Ubuntu 26.04, outside the pinned browser's supported matrix. The recording job pins Ubuntu 24.04.
+
+Browser interactions and the mobile assertions passed on Ubuntu 24.04. The runner lacked FFmpeg, so the encoding stage failed before upload. The workflow now installs FFmpeg explicitly before transcoding and verifying the recordings.

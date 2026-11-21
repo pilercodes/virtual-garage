@@ -31,14 +31,22 @@ function setupCursor() {
   addEventListener('mouseup', () => { if (pointer) pointer.style.background = '#ff854b'; }, true);
 }
 
+const lastPointer = new WeakMap();
+
 async function move(page, target) {
   await target.scrollIntoViewIfNeeded();
   const box = await target.boundingBox();
   assert.ok(box);
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
-  await page.mouse.move(x, y, { steps: 30 });
-  await page.waitForTimeout(360);
+  const start = lastPointer.get(page) ?? { x: size.width / 2, y: 110 };
+  for (let frame = 1; frame <= 20; frame++) {
+    const fraction = 0.5 - Math.cos(Math.PI * frame / 20) / 2;
+    await page.mouse.move(start.x + (x - start.x) * fraction, start.y + (y - start.y) * fraction);
+    await page.waitForTimeout(16);
+  }
+  lastPointer.set(page, { x, y });
+  await page.waitForTimeout(250);
   return { x, y };
 }
 
@@ -95,7 +103,7 @@ try {
     await click(page, page.getByRole('button', { name: 'Add vehicle' }));
     await page.waitForTimeout(2000);
     await click(page, page.getByRole('button', { name: 'Cancel' }));
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(4000);
   });
 
   await record('virtual-garage-maintenance', async page => {
