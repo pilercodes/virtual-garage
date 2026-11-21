@@ -29,7 +29,7 @@ try {
   await entry.getByText('DIY / Work Instructions · Draft', { exact: true }).click();
   const preview = step.getByRole('img', { name: 'test.png' });
   await preview.waitFor();
-  const response = await page.request.get(await preview.getAttribute('src'));
+  const response = await page.request.get(new URL(await preview.getAttribute('src'), page.url()).href);
   assert.equal(response.status(), 200);
   assert.deepEqual(await response.body(), photo.buffer);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
