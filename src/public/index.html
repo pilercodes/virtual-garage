@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#151515">
+  <title>Virtual Garage</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <a class="brand" href="/" aria-label="Virtual Garage home"><span class="mark" aria-hidden="true"></span>VIRTUAL <span>GARAGE</span></a>
+      <nav aria-label="Main navigation"><a href="#garage" aria-current="page">My garage</a></nav>
+    </div>
+  </header>
+  <main id="main">
+    <section id="garage" aria-labelledby="garage-title">
+      <div class="hero">
+        <div><h1 id="garage-title" tabindex="-1">My garage<span>.</span></h1><p id="count" aria-live="polite"></p></div>
+        <button class="primary" id="add-vehicle" type="button" disabled><span aria-hidden="true">+</span> Add vehicle</button>
+      </div>
+      <p id="garage-status" role="status">Loading your garage…</p>
+      <button class="secondary" id="retry" type="button" hidden>Retry loading garage</button>
+      <div id="vehicles" class="grid"></div>
+      <p class="caption">Vehicle images are illustrative.</p>
+    </section>
+    <section id="profile" aria-labelledby="profile-title" hidden>
+      <a class="back" href="#garage">All vehicles</a>
+      <div class="profile-hero">
+        <div class="vehicle-image" id="profile-image" aria-hidden="true"></div>
+        <div class="profile-copy">
+          <p class="eyebrow" id="profile-make"></p>
+          <h1 id="profile-title" tabindex="-1"></h1>
+          <p id="profile-color"></p>
+          <button class="secondary" id="edit-vehicle" type="button">Edit vehicle</button>
+        </div>
+      </div>
+      <div id="profile-content"></div>
+    </section>
+  </main>
+  <footer><span>VIRTUAL GARAGE</span></footer>
+  <dialog id="editor" aria-labelledby="editor-title">
+    <form id="editor-form">
+      <div class="dialog-head"><h2 id="editor-title"></h2><button class="close" type="button" aria-label="Close dialog">×</button></div>
+      <div id="fields"></div>
+      <p id="form-error" role="alert"></p>
+      <div class="actions"><button class="secondary cancel" type="button">Cancel</button><button class="primary" type="submit">Save vehicle</button></div>
+    </form>
+  </dialog>
+  <template id="vehicle-template">
+    <div class="field-row"><label>Year<input name="year" type="number" required min="1886" step="1" inputmode="numeric"></label><label><span>Color <small>(optional)</small></span><input name="color" maxlength="60"></label></div>
+    <label>Make<input name="make" maxlength="60" required></label>
+    <label>Model<input name="model" maxlength="80" required></label>
+  </template>
+</body>
+</html>
