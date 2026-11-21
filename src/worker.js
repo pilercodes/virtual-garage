@@ -32,11 +32,38 @@ async function readBody(request) {
   }
 }
 
+async function maintenance(request, env, url, user, vehicleId) {
+  const { DB } = env;
+  const isDefault = vehicles.some(vehicle => vehicle.id === vehicleId);
+  if (!isDefault && !await DB.prepare('SELECT 1 FROM vehicles WHERE owner = ? AND id = ?').bind(user, vehicleId).first()) {
+    return error('Vehicle not found.', 404);
+  }
+  if (request.method === 'GET') {
+    const { results } = await DB.prepare('SELECT id, description, date, mileage, cost_cents AS costCents, notes FROM maintenance WHERE owner = ? AND vehicle_id = ? ORDER BY date DESC, id')
+      .bind(user, vehicleId).all();
+    return json(results);
+  }
+  if (request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return error('Request origin is not allowed.', 403);
+    const item = cleanService(await readBody(request));
+    if (!item) return error('Check the service, date, mileage, cost and notes.', 400);
+    const id = crypto.randomUUID();
+    await DB.prepare('INSERT INTO maintenance (owner, vehicle_id, id, description, date, mileage, cost_cents, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(user, vehicleId, id, item.description, item.date, item.mileage, item.costCents, item.notes).run();
+    return json({ id, ...item }, 201);
+  }
+  return error('Method not allowed.', 405);
+}
+
 async function garage(request, env, url) {
   const user = request.headers.get('oai-authenticated-user-id');
   if (!user) return error('Sign in to open your garage.', 401);
   const route = /^\/api\/vehicles(?:\/([a-z0-9-]{1,60}))?$/.exec(url.pathname);
-  if (!route) return error('Page not found.', 404);
+  if (!route) {
+    const serviceRoute = /^\/api\/vehicles\/([a-z0-9-]{1,60})\/maintenance$/.exec(url.pathname);
+    if (serviceRoute) return maintenance(request, env, url, user, serviceRoute[1]);
+    return error('Page not found.', 404);
+  }
   const { DB } = env;
   const vehicleId = route[1];
   if (request.method === 'GET' && !vehicleId) {

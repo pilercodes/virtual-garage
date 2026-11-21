@@ -52,3 +52,29 @@ test('vehicle API rejects anonymous, cross-origin, oversized, and invalid writes
   assert.equal((await request('vehicles', { method: 'POST', body: { year: '2012', model: 'Corolla' } })).status, 400);
   assert.equal((await request('vehicles', { method: 'POST', body: { make: 'x'.repeat(9000) } })).status, 400);
 });
+
+test('maintenance validates input and stores exact cents per vehicle and account', async t => {
+  const request = fixture(t);
+  const path = 'vehicles/corvette/maintenance';
+  const body = { description: 'Demo oil service', date: '2024-02-29', mileage: 0, cost: '15.09', notes: 'Demonstration only.' };
+  const created = await request(path, { method: 'POST', body });
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).costCents, 1509);
+  assert.equal((await (await request(path)).json()).length, 1);
+  assert.equal((await (await request(path, { user: 'owner-b' })).json()).length, 0);
+  assert.equal((await (await request('vehicles/corolla/maintenance')).json()).length, 0);
+  assert.equal((await request(path, { method: 'POST', body: { ...body, date: '2025-02-29' } })).status, 400);
+  assert.equal((await request(path, { method: 'POST', body: { ...body, cost: '15.009' } })).status, 400);
+  assert.equal((await request(path, { method: 'POST', body, user: '' })).status, 401);
+  assert.equal((await request(path, { method: 'POST', body, from: 'https://other.test' })).status, 403);
+});
+
+test('maintenance can attach to an added vehicle and rejects other accounts and unknown vehicles', async t => {
+  const request = fixture(t);
+  const vehicle = await (await request('vehicles', { method: 'POST', body: { year: 2020, make: 'Mazda', model: 'MX-5' } })).json();
+  const path = 'vehicles/' + vehicle.id + '/maintenance';
+  const body = { description: 'Demo inspection', date: '2025-01-01', mileage: 100, cost: '0' };
+  assert.equal((await request(path, { method: 'POST', body })).status, 201);
+  assert.equal((await request(path, { method: 'POST', body, user: 'owner-b' })).status, 404);
+  assert.equal((await request('vehicles/missing/maintenance')).status, 404);
+});

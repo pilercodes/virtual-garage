@@ -77,3 +77,14 @@ textarea { resize: vertical; }
   .vehicle-image { aspect-ratio: 1.45; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+
+#profile-content { margin-top: clamp(28px, 5vw, 60px); }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+#maintenance-status { margin: 12px 0; color: var(--muted); }
+.record { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 24px; padding: 20px; margin-top: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.record h3 { margin: 0; overflow-wrap: anywhere; }
+.record .notes { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); margin-top: 5px; }
+.record dl { display: flex; gap: 18px; margin: 0; flex-wrap: wrap; }
+.record dd { margin: 3px 0 0; font-weight: 730; }
+.record dt { color: var(--muted); font-size: .875rem; }
+@media (max-width: 700px) { .record { grid-template-columns: 1fr; gap: 12px; } }
