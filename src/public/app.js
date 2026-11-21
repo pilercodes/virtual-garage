@@ -18,13 +18,13 @@ function element(tag, className, value) {
   return node;
 }
 
-async function api(path, options = {}) {
+async function api(path, options = {}, garage = activeGarage) {
   const response = await fetch('/api/' + path, {
     ...options,
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
-      ...(!path.startsWith('account/') && activeGarage ? { 'X-Garage': activeGarage } : {})
+      ...(!path.startsWith('account/') && garage ? { 'X-Garage': garage } : {})
     }
   });
   if (!response.ok) {
@@ -95,7 +95,8 @@ function render(focus = false) {
 }
 
 function renderProfile(vehicle) {
-  mountWorkshop(byId('profile-content'), vehicle, activeGarage, api, photo => {
+  const garage = activeGarage;
+  mountWorkshop(byId('profile-content'), vehicle, activeGarage, (path, options) => api(path, options, garage), photo => {
     vehicle.photo = photo;
     if (viewing?.id === vehicle.id) setImage(byId('profile-image'), vehicle);
   });

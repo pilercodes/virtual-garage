@@ -43,6 +43,13 @@
       "when": 1795254405000,
       "tag": "0006_file_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795254406000,
+      "tag": "0007_workshop_integrity",
+      "breakpoints": true
     }
   ]
 }

@@ -344,11 +344,6 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
     const { meta } = await DB.prepare('UPDATE maintenance SET description = ?, date = ?, mileage = ?, cost_cents = ?, notes = ?, entry_type = ?, status = ?, details = ?, revision = revision + 1 WHERE owner = ? AND vehicle_id = ? AND id = ? AND revision = ?')
       .bind(title, date, mileage ?? 0, cost, notes, input.type, input.status, details, owner, vehicle, id, input.revision ?? -1).run();
     if (!meta.changes) return error('This entry changed. Reload before saving.', 409);
-    const { results } = await DB.prepare('SELECT id, target FROM garage_files WHERE owner = ? AND vehicle_id = ? AND target LIKE ?')
-      .bind(owner, vehicle, 'step:' + id + ':%').all();
-    for (const file of results.filter(file => !steps.some(step => file.target === 'step:' + id + ':' + step.id))) {
-      await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, file.id).run();
-    }
     return json({ id });
   }
   if (request.method === 'DELETE' && id) {
@@ -389,9 +384,15 @@ export async function handleWorkshop(request, env, url, access, starter, helpers
   if (!starter.some(item => item.id === vehicle) && !await env.DB.prepare('SELECT id FROM vehicles WHERE owner = ? AND id = ?')
     .bind(owner, vehicle).first()) return helpers.error('Vehicle not found.', 404);
   if (request.method !== 'GET' && request.headers.get('origin') !== url.origin) return helpers.error('Request origin is not allowed.', 403);
-  const result = await (section === 'records' ? workshopRecords(request, env, owner, vehicle, id, helpers) :
-    section === 'files' ? workshopFiles(request, env, url, owner, vehicle, id, helpers) :
-      workshopLogs(request, env, owner, vehicle, id, helpers));
+  let result;
+  try {
+    result = await (section === 'records' ? workshopRecords(request, env, owner, vehicle, id, helpers) :
+      section === 'files' ? workshopFiles(request, env, url, owner, vehicle, id, helpers) :
+        workshopLogs(request, env, owner, vehicle, id, helpers));
+  } catch (cause) {
+    if (cause.message.includes('Workshop relationship changed')) return helpers.error('A linked record changed. Reload before trying again.', 409);
+    throw cause;
+  }
   if (request.method !== 'GET' && result.ok) await workshopCleanFiles(env, owner).catch(() => {});
   return result;
 }
