@@ -2,7 +2,26 @@
   "version": "7",
   "dialect": "sqlite",
   "entries": [
-    {"idx": 0, "version": "6", "when": 1795254400000, "tag": "0001_vehicles", "breakpoints": true},
-    {"idx": 1, "version": "6", "when": 1795254401000, "tag": "0002_maintenance", "breakpoints": true}
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1795254400000,
+      "tag": "0001_vehicles",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1795254401000,
+      "tag": "0002_maintenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795254402000,
+      "tag": "0003_garage_accounts",
+      "breakpoints": true
+    }
   ]
 }

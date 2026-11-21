@@ -1,3 +1,4 @@
+import { accountGarage, handleAccount } from './accounts.js';
 import { vehicles, cleanVehicle, cleanService } from './model.js';
 
 const headers = {
@@ -32,9 +33,9 @@ async function readBody(request) {
   }
 }
 
-async function maintenance(request, env, url, user, vehicleId) {
+async function maintenance(request, env, url, user, vehicleId, starter) {
   const { DB } = env;
-  const isDefault = vehicles.some(vehicle => vehicle.id === vehicleId);
+  const isDefault = starter.some(vehicle => vehicle.id === vehicleId);
   if (!isDefault && !await DB.prepare('SELECT 1 FROM vehicles WHERE owner = ? AND id = ?').bind(user, vehicleId).first()) {
     return error('Vehicle not found.', 404);
   }
@@ -56,12 +57,15 @@ async function maintenance(request, env, url, user, vehicleId) {
 }
 
 async function garage(request, env, url) {
-  const user = request.headers.get('oai-authenticated-user-id');
-  if (!user) return error('Sign in to open your garage.', 401);
+  const access = await accountGarage(request, env);
+  if (!access) return error('Sign in to open your garage.', 401);
+  if (access.forbidden) return error('Garage not found.', 404);
+  const user = access.id;
+  const starter = access.starter ? vehicles : [];
   const route = /^\/api\/vehicles(?:\/([a-z0-9-]{1,60}))?$/.exec(url.pathname);
   if (!route) {
     const serviceRoute = /^\/api\/vehicles\/([a-z0-9-]{1,60})\/maintenance$/.exec(url.pathname);
-    if (serviceRoute) return maintenance(request, env, url, user, serviceRoute[1]);
+    if (serviceRoute) return maintenance(request, env, url, user, serviceRoute[1], starter);
     return error('Page not found.', 404);
   }
   const { DB } = env;
@@ -69,8 +73,8 @@ async function garage(request, env, url) {
   if (request.method === 'GET' && !vehicleId) {
     const { results } = await DB.prepare('SELECT id, year, make, model, color FROM vehicles WHERE owner = ? ORDER BY position, id').bind(user).all();
     const saved = new Map(results.map(row => [row.id, row]));
-    return json([...vehicles.map(vehicle => saved.get(vehicle.id) ?? vehicle),
-      ...results.filter(row => !vehicles.some(vehicle => vehicle.id === row.id))]);
+    return json([...starter.map(vehicle => saved.get(vehicle.id) ?? vehicle),
+      ...results.filter(row => !starter.some(vehicle => vehicle.id === row.id))]);
   }
   if ((request.method === 'POST' && !vehicleId) || (request.method === 'PUT' && vehicleId)) {
     if (request.headers.get('origin') !== url.origin) return error('Request origin is not allowed.', 403);
@@ -82,7 +86,7 @@ async function garage(request, env, url) {
         .bind(user, id, item.year, item.make, item.model, item.color, Date.now()).run();
       return json({ id, ...item }, 201);
     }
-    const position = vehicles.findIndex(vehicle => vehicle.id === vehicleId);
+    const position = starter.findIndex(vehicle => vehicle.id === vehicleId);
     if (position >= 0) {
       await DB.prepare('INSERT INTO vehicles (owner, id, year, make, model, color, position) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(owner, id) DO UPDATE SET year = excluded.year, make = excluded.make, model = excluded.model, color = excluded.color')
         .bind(user, vehicleId, item.year, item.make, item.model, item.color, position).run();
@@ -100,6 +104,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      if (url.pathname.startsWith('/api/account/')) return await handleAccount(request, env, url, { json, error, readBody });
       if (url.pathname.startsWith('/api/')) return await garage(request, env, url);
       const asset = Object.hasOwn(assets, url.pathname) && assets[url.pathname];
       if (!asset || !['GET', 'HEAD'].includes(request.method)) return error('Page not found.', 404);

@@ -18,6 +18,18 @@ export function localDatabase(path = ':memory:') {
     }
   }
   return {
+    async batch(statements) {
+      db.exec('BEGIN');
+      try {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        db.exec('COMMIT');
+        return results;
+      } catch (cause) {
+        db.exec('ROLLBACK');
+        throw cause;
+      }
+    },
     prepare(sql) {
       const statement = db.prepare(sql);
       return {

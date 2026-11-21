@@ -4,8 +4,9 @@ on:
     paths:
       - '.github/workflows/recordings.yml'
       - 'scripts/record.mjs'
+      - 'scripts/check-accounts.mjs'
       - 'src/**'
-      - 'migrations/**'
+      - 'drizzle/**'
 permissions:
   contents: read
 jobs:
@@ -21,6 +22,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Record the local application and test mobile
         env:
+          GARAGE_DEMO_PREVIEW: 'true'
           GARAGE_DB: ":memory:"
         run: |
           npm run dev > /tmp/virtual-garage.log 2>&1 &
@@ -28,6 +30,16 @@ jobs:
           trap 'kill "$preview_pid" 2>/dev/null || true; cat /tmp/virtual-garage.log' EXIT
           curl --fail --retry 10 --retry-connrefused -sS http://127.0.0.1:3000/ > /dev/null
           node scripts/record.mjs recordings
+      - name: Verify separate accounts and shared garage in Chromium
+        env:
+          GARAGE_DB: ":memory:"
+          PORT: "3001"
+        run: |
+          npm run dev > /tmp/virtual-garage-accounts.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true; cat /tmp/virtual-garage-accounts.log' EXIT
+          curl --fail --retry 10 --retry-connrefused -sS http://127.0.0.1:3001/ > /dev/null
+          node scripts/check-accounts.mjs
       - name: Install FFmpeg
         run: sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Encode and verify both clips

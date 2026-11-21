@@ -16,7 +16,40 @@
     </div>
   </header>
   <main id="main">
-    <section id="garage" aria-labelledby="garage-title">
+    <section id="account-panel" class="account-panel" hidden aria-labelledby="account-title">
+      <h1 id="account-title">Your garage<span>.</span></h1>
+      <p>Sign in to Virtual Garage or create your own account.</p>
+      <form id="account-form">
+        <label>Email<input type="email" name="email" autocomplete="username" maxlength="254" required></label>
+        <label>Password<input type="password" name="password" autocomplete="current-password" minlength="12" maxlength="128" required></label>
+        <p>Use at least 12 characters.</p>
+        <div class="account-actions">
+          <button class="primary" type="submit" value="login">Sign in</button>
+          <button class="secondary" type="submit" value="signup">Create account</button>
+        </div>
+      </form>
+    </section>
+    <div id="garage-tools" hidden>
+      <div class="account-actions">
+        <label id="garage-picker-label">Garage<select id="garage-picker"></select></label>
+        <button class="secondary" id="sharing-button" type="button">Sharing</button>
+        <button class="secondary" id="sign-out" type="button">Sign out</button>
+      </div>
+      <button class="secondary" id="import-garage" type="button" hidden>Bring over my existing garage</button>
+      <section class="account-panel" id="sharing-panel" hidden aria-labelledby="sharing-title">
+        <h2 id="sharing-title">Share my garage</h2>
+        <p>Anyone who redeems an invite can view and edit your garage.</p>
+        <button class="secondary" id="create-invite" type="button">Create invite link</button>
+        <label id="invite-result" hidden>Copy this single-use link. It expires in 24 hours.<input id="invite-link" readonly></label>
+        <form id="join-form">
+          <label>Invitation link or code<input name="token" required></label>
+          <button class="primary" type="submit">Join garage</button>
+        </form>
+        <div id="garage-members"></div>
+      </section>
+    </div>
+    <p id="account-status" role="status"></p>
+    <section id="garage" aria-labelledby="garage-title" hidden>
       <div class="hero">
         <div><h1 id="garage-title" tabindex="-1">My garage<span>.</span></h1><p id="count" aria-live="polite"></p></div>
         <button class="primary" id="add-vehicle" type="button" disabled><span aria-hidden="true">+</span> Add vehicle</button>
