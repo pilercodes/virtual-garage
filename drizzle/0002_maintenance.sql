@@ -9,4 +9,5 @@ CREATE TABLE maintenance (
   notes TEXT NOT NULL,
   PRIMARY KEY (owner, vehicle_id, id)
 );
+--> statement-breakpoint
 CREATE INDEX maintenance_by_date ON maintenance (owner, vehicle_id, date DESC, id);

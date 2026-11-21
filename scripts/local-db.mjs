@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 export function localDatabase(path = ':memory:') {
   const db = new DatabaseSync(path);
   db.exec('CREATE TABLE IF NOT EXISTS applied_migrations (file TEXT PRIMARY KEY)');
-  const directory = new URL('../migrations/', import.meta.url);
+  const directory = new URL('../drizzle/', import.meta.url);
   for (const file of readdirSync(directory).filter(name => name.endsWith('.sql')).sort()) {
     if (db.prepare('SELECT file FROM applied_migrations WHERE file = ?').get(file)) continue;
     db.exec('BEGIN');
