@@ -12,7 +12,7 @@ function fixture(t) {
     const headers = {};
     if (user) headers['oai-authenticated-user-id'] = user;
     if (body !== undefined) Object.assign(headers, { origin: from, 'content-type': 'application/json' });
-    return worker.fetch(new Request(origin + '/api/' + path, { method, headers, body: JSON.stringify(body) }), { DB });
+    return worker.fetch(new Request(origin + '/api/' + path, { method, headers, body: JSON.stringify(body) }), { DB, LOCAL_LEGACY_PREVIEW: true });
   };
 }
 

@@ -1,3 +1,4 @@
+import { setupGarageAccount } from './account-ui.js';
 const byId = id => document.getElementById(id);
 const vehicleList = byId('vehicles');
 const garageStatus = byId('garage-status');
@@ -7,6 +8,7 @@ const submit = form.querySelector('[type=submit]');
 let vehicles = [];
 let saveEditor;
 let viewing;
+let authenticated = false;
 let maintenanceLoad = 0;
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const number = new Intl.NumberFormat('en-US');
@@ -22,11 +24,17 @@ function element(tag, className, value) {
 async function api(path, options = {}) {
   const response = await fetch('/api/' + path, {
     ...options,
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+      ...(!path.startsWith('account/') && activeGarage ? { 'X-Garage': activeGarage } : {})
+    }
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
-    throw new Error(detail.error || 'Request failed. Try again.');
+    const error = new Error(detail.error || 'Request failed. Try again.');
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -58,6 +66,7 @@ function card(vehicle) {
 }
 
 function render(focus = false) {
+  if (!authenticated) return;
   const id = location.hash.startsWith('#vehicle/') ? location.hash.slice(9) : '';
   viewing = vehicles.find(vehicle => vehicle.id === id);
   byId('garage').hidden = Boolean(viewing);
@@ -183,15 +192,22 @@ byId('edit-vehicle').addEventListener('click', () => vehicleEditor(viewing));
 byId('add-maintenance').addEventListener('click', () => maintenanceEditor(viewing));
 byId('retry-maintenance').addEventListener('click', () => renderProfile(viewing));
 
+let activeGarage;
+let garageLoad = 0;
+
 async function loadGarage() {
+  const load = ++garageLoad;
   byId('retry').hidden = true;
   garageStatus.textContent = 'Loading your garage…';
   try {
-    vehicles = await api('vehicles');
+    const list = await api('vehicles');
+    if (load !== garageLoad) return;
+    vehicles = list;
     garageStatus.hidden = true;
     byId('add-vehicle').disabled = false;
     render();
   } catch (error) {
+    if (load !== garageLoad) return;
     garageStatus.textContent = error.message;
     byId('retry').hidden = false;
   }
@@ -199,4 +215,20 @@ async function loadGarage() {
 
 window.addEventListener('hashchange', () => render(true));
 byId('retry').addEventListener('click', loadGarage);
-await loadGarage();
+await setupGarageAccount(api, async id => {
+  activeGarage = id;
+  authenticated = Boolean(id);
+  garageLoad++;
+  maintenanceLoad++;
+  vehicles = [];
+  viewing = undefined;
+  vehicleList.replaceChildren();
+  byId('maintenance-list').replaceChildren();
+  byId('profile').hidden = true;
+  byId('garage').hidden = !id;
+  if (id) {
+    garageStatus.hidden = false;
+    byId('add-vehicle').disabled = true;
+    await loadGarage();
+  }
+});
