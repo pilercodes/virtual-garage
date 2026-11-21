@@ -119,10 +119,7 @@ async function workshopFiles(request, env, url, owner, vehicle, id, helpers) {
       DB.prepare('DELETE FROM garage_file_cleanup WHERE owner = ? AND id = ? AND EXISTS (SELECT 1 FROM garage_files WHERE owner = ? AND id = ?)')
         .bind(owner, id, owner, id)
     ]);
-    if (!result.meta.changes || !await workshopTarget(DB, owner, vehicle, target)) {
-      await DB.prepare('DELETE FROM garage_files WHERE owner = ? AND id = ?').bind(owner, id).run();
-      return error('Attachment target changed or upload limit was reached.', 409);
-    }
+    if (!result.meta.changes) return error('The vehicle attachment limit was reached.', 409);
     return json({ id }, 201);
   }
   if (file && request.method === 'PUT') {

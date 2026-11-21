@@ -66,3 +66,18 @@ WHEN NEW.kind = 'project' AND (
 BEGIN
   SELECT RAISE(ABORT, 'Workshop relationship changed');
 END;
+--> statement-breakpoint
+CREATE TRIGGER workshop_guard_file_insert
+BEFORE INSERT ON garage_files
+WHEN NOT (
+  NEW.target = 'vehicle'
+  OR EXISTS (SELECT 1 FROM maintenance m WHERE m.owner = NEW.owner AND m.vehicle_id = NEW.vehicle_id
+    AND (NEW.target IN ('log:' || m.id, 'receipt:' || m.id, 'warranty:' || m.id)
+      OR EXISTS (SELECT 1 FROM json_each(m.details, '$.steps') WHERE NEW.target = 'step:' || m.id || ':' || json_extract(value, '$.id'))))
+  OR EXISTS (SELECT 1 FROM workshop_records r WHERE r.owner = NEW.owner AND r.vehicle_id = NEW.vehicle_id
+    AND ((r.kind = 'part' AND NEW.target IN ('part:' || r.id, 'part-warranty:' || r.id))
+      OR (r.kind = 'project' AND NEW.target = 'project:' || r.id)))
+)
+BEGIN
+  SELECT RAISE(ABORT, 'Workshop relationship changed');
+END;
