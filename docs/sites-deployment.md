@@ -35,3 +35,5 @@ Sites returned a successful private deployment, and the hosted URL showed the Ch
 - Sites version: `appgprj_6b01de1e1d148191bb842cb4d38b147c~appgver_2bb495e9a57481919b29bc443c1493af`.
 - The same owner-only URL served the new release. The archive contained `.openai/hosting.json`, `dist/server/index.js`, and `drizzle/` with its journal. Sites D1 reported both `vehicles` and `maintenance` after publication.
 - The source push was followed by an explicit private save-and-deploy action. All six tests passed. Hosted write and reload verification needs the site's signed-in owner session.
+
+Documentation-only updates can be merged without redeploying the Site. Deploy when the application, hosting manifest, or database schema changes.
