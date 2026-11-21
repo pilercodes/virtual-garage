@@ -121,6 +121,7 @@ export async function handleAccount(request, env, url, { json, error, readBody }
       (SELECT 1 FROM garage_invites WHERE garage_id = garage_accounts.id AND claimed_by = ?)
       ORDER BY id != ?, email`).bind(account.id, account.id, account.id).all();
     return json({
+      email: results[0].email,
       garages: results.map(row => ({ id: row.id, owner: row.id === account.id, label: row.id === account.id ? 'My garage' : 'Shared garage (' + row.email + ')' })),
       canImport: env.LEGACY_IMPORT_ENABLED === 'true' && Boolean(request.headers.get('oai-authenticated-user-id'))
     });

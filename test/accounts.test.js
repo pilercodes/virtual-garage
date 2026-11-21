@@ -9,14 +9,14 @@ const password = 'correct horse fixture password';
 function fixture(t) {
   const DB = localDatabase();
   t.after(() => DB.close());
-  async function call(path, { body, cookie, garage, legacy, from = origin, method = body ? 'POST' : 'GET' } = {}) {
+  async function call(path, { body, cookie, garage, legacy, importEnabled, from = origin, method = body ? 'POST' : 'GET' } = {}) {
     const headers = new Headers({ origin: from, 'content-type': 'application/json' });
     if (cookie) headers.set('cookie', cookie);
     if (garage) headers.set('x-garage', garage);
     if (legacy) headers.set('oai-authenticated-user-id', legacy);
     const response = await worker.fetch(new Request(origin + '/api/' + path, {
       method, headers, body: body ? JSON.stringify(body) : undefined
-    }), { DB, LEGACY_IMPORT_ENABLED: legacy === 'authorized-legacy' ? 'true' : undefined });
+    }), { DB, LEGACY_IMPORT_ENABLED: importEnabled ? 'true' : undefined });
     return { status: response.status, data: await response.json(), cookie: response.headers.get('set-cookie') };
   }
 
@@ -69,12 +69,13 @@ test('private legacy import moves only that owner’s records and can run once',
     .bind('authorized-legacy', 'private-car', 2012, 'Demo', 'Legacy', '', 1).run();
   await DB.prepare('INSERT INTO maintenance VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .bind('authorized-legacy', 'private-car', 'service', 'Demo service', '2025-01-01', 0, 0, '').run();
-  assert.equal((await call('account/import', { cookie, body: {}, legacy: 'other' })).status, 403);
+  assert.equal((await call('account/import', { cookie, body: {}, legacy: 'authorized-legacy' })).status, 403);
+  assert.equal((await call('account/import', { cookie, body: {}, importEnabled: true })).status, 403);
   const shared = await signup('shared@example.com');
   await call('account/invite', { cookie: shared, body: {} });
-  assert.equal((await call('account/import', { cookie: shared, body: {}, legacy: 'authorized-legacy' })).status, 409);
-  assert.equal((await call('account/import', { cookie, body: {}, legacy: 'authorized-legacy' })).status, 200);
-  assert.equal((await call('account/import', { cookie, body: {}, legacy: 'authorized-legacy' })).status, 409);
+  assert.equal((await call('account/import', { cookie: shared, body: {}, legacy: 'authorized-legacy', importEnabled: true })).status, 409);
+  assert.equal((await call('account/import', { cookie, body: {}, legacy: 'authorized-legacy', importEnabled: true })).status, 200);
+  assert.equal((await call('account/import', { cookie, body: {}, legacy: 'authorized-legacy', importEnabled: true })).status, 409);
   assert.equal((await call('vehicles', { cookie })).data.length, 4);
   assert.equal((await call('vehicles/private-car/maintenance', { cookie })).data[0].id, 'service');
 });

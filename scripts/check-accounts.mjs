@@ -26,6 +26,7 @@ try {
   await invite.waitFor();
   await guest.goto(await invite.inputValue());
   await register(guest, 'guest@example.test');
+  await guest.getByRole('button', { name: 'Join garage' }).click();
   await guest.getByRole('link', { name: /Shared vehicle/ }).waitFor();
   await guest.getByLabel('Garage', { exact: true }).selectOption({ label: 'My garage' });
   await guest.getByText('0 vehicles', { exact: true }).waitFor();

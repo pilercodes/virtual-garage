@@ -70,14 +70,16 @@ export async function setupGarageAccount(api, selectGarage) {
     picker.value = currentGarage;
     await selectGarage(currentGarage);
     if (inviteToken) {
-      const token = inviteToken;
-      inviteToken = null;
-      await join(token);
+      sharing.hidden = false;
+      byId('join-form').elements.namedItem('token').value = inviteToken;
+      status.textContent = 'Review and join the invitation as ' + account.email + '. Sign out to switch accounts.';
+      byId('join-form').querySelector('button').focus();
     }
   }
 
   async function join(token) {
     const garage = await request('join', { token });
+    if (token === inviteToken) inviteToken = null;
     currentGarage = garage.id;
     await refresh();
     status.textContent = 'You joined the shared garage.';
