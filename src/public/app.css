@@ -139,3 +139,6 @@ dialog input[type=checkbox] { width: 1.25rem; min-height: 1.25rem; accent-color:
   .workshop-print { position: absolute; top: 0; left: 0; margin: 1cm; }
   .workshop-print .notes { color: #111; }
 }
+.workshop-toolbar > label { min-width: 0; grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
+.workshop-toolbar > label > :is(input, select), .workshop-content select, dialog select { width: 100%; min-width: 0; }
+.garage-summary, .workshop-content, .workshop-item { min-width: 0; max-width: 100%; }

@@ -139,7 +139,12 @@ try {
     const page = await mobile.newPage();
     await page.goto(url);
     await page.getByRole('link', { name: /2012 Toyota Corolla/ }).waitFor();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+    const dimensions = await page.evaluate(() => ({
+      width: document.documentElement.scrollWidth,
+      overflow: [...document.querySelectorAll('main *')].filter(node => node.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 8).map(node => node.tagName + '.' + node.className)
+    }));
+    assert.equal(dimensions.width, 390, 'Overflow: ' + dimensions.overflow.join(', '));
     await page.getByRole('button', { name: 'Add vehicle' }).click();
     await page.getByLabel('Year').fill('2010');
     await page.getByLabel('Make').fill('Mazda');
