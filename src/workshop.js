@@ -360,8 +360,8 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
 
 async function workshopOverview(env, owner, helpers) {
   const [logs, records] = await Promise.all([
-    env.DB.prepare('SELECT * FROM maintenance WHERE owner = ? ORDER BY date DESC, id').bind(owner).all(),
-    env.DB.prepare("SELECT vehicle_id, id, kind, data FROM workshop_records WHERE owner = ? AND kind != 'procedure'").bind(owner).all()
+    env.DB.prepare('SELECT * FROM maintenance WHERE owner = ? AND NOT EXISTS (SELECT 1 FROM archived_vehicles a WHERE a.owner = maintenance.owner AND a.vehicle_id = maintenance.vehicle_id) ORDER BY date DESC, id').bind(owner).all(),
+    env.DB.prepare("SELECT vehicle_id, id, kind, data FROM workshop_records WHERE owner = ? AND kind != 'procedure' AND NOT EXISTS (SELECT 1 FROM archived_vehicles a WHERE a.owner = workshop_records.owner AND a.vehicle_id = workshop_records.vehicle_id)").bind(owner).all()
   ]);
   return helpers.json({
     logs: logs.results.map(row => ({ ...workshopLogRow(row), vehicleId: row.vehicle_id })),
@@ -378,6 +378,9 @@ export async function handleWorkshop(request, env, url, access, starter, helpers
   if (!match) return helpers.error('Page not found.', 404);
   const [, vehicle, section, id] = match;
   const owner = access.id;
+  if (await env.DB.prepare('SELECT 1 FROM archived_vehicles WHERE owner = ? AND vehicle_id = ?').bind(owner, vehicle).first()) {
+    return helpers.error('Vehicle not found.', 404);
+  }
   if (!starter.some(item => item.id === vehicle) && !await env.DB.prepare('SELECT id FROM vehicles WHERE owner = ? AND id = ?')
     .bind(owner, vehicle).first()) return helpers.error('Vehicle not found.', 404);
   if (request.method !== 'GET' && request.headers.get('origin') !== url.origin) return helpers.error('Request origin is not allowed.', 403);

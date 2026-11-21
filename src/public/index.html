@@ -58,6 +58,10 @@
       <button class="secondary" id="retry" type="button" hidden>Retry loading garage</button>
       <div id="vehicles" class="grid"></div>
       <p class="caption">Starter images are illustrative.</p>
+      <details id="removed-vehicles" hidden>
+        <summary>Removed vehicles</summary>
+        <div id="removed-list"></div>
+      </details>
       <section id="garage-overview" aria-label="Garage overview"></section>
     </section>
     <section id="profile" aria-labelledby="profile-title" hidden>
@@ -68,7 +72,11 @@
           <p class="eyebrow" id="profile-make"></p>
           <h1 id="profile-title" tabindex="-1"></h1>
           <p id="profile-color"></p>
-          <button class="secondary" id="edit-vehicle" type="button">Edit vehicle</button>
+          <div class="account-actions">
+            <button class="secondary" id="edit-vehicle" type="button">Edit vehicle</button>
+            <button class="secondary danger" id="delete-vehicle" type="button">Delete vehicle</button>
+          </div>
+          <p id="vehicle-action-status" role="status"></p>
         </div>
       </div>
       <section id="profile-content" aria-label="Vehicle workshop"></section>

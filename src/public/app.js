@@ -78,6 +78,7 @@ function render(focus = false) {
   byId('garage').hidden = Boolean(viewing);
   byId('profile').hidden = !viewing;
   if (viewing) {
+    byId('vehicle-action-status').textContent = '';
     byId('profile-title').textContent = viewing.model;
     byId('profile-make').textContent = viewing.year + ' ' + viewing.make;
     byId('profile-color').textContent = viewing.color || 'Color unspecified';
@@ -159,14 +160,67 @@ byId('edit-vehicle').addEventListener('click', () => vehicleEditor(viewing));
 let activeGarage;
 let garageLoad = 0;
 
+byId('delete-vehicle').addEventListener('click', async event => {
+  const current = viewing;
+  const garage = activeGarage;
+  const button = event.currentTarget;
+  const status = byId('vehicle-action-status');
+  if (!current || !confirm('Delete ' + current.model + ' from the dashboard? You can restore it and its history from Removed vehicles.')) return;
+  button.disabled = true;
+  status.textContent = '';
+  try {
+    await api('vehicles/' + current.id, { method: 'DELETE' }, garage);
+    if (activeGarage !== garage) return;
+    if (viewing?.id === current.id) history.replaceState(null, '', '#garage');
+    await loadGarage();
+    if (activeGarage === garage && !viewing) byId('garage-title').focus();
+  } catch (error) {
+    if (activeGarage === garage && viewing?.id === current.id) status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+function renderRemoved(removed) {
+  const details = byId('removed-vehicles');
+  const list = byId('removed-list');
+  const garage = activeGarage;
+  details.hidden = removed.length === 0;
+  list.replaceChildren(...removed.map(vehicle => {
+    const row = element('div', 'account-actions');
+    const name = element('span', '', [vehicle.year, vehicle.make, vehicle.model].join(' '));
+    const button = element('button', 'secondary', 'Restore vehicle');
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Restore ' + vehicle.model);
+    const status = element('span', '');
+    status.setAttribute('role', 'status');
+    row.append(name, button, status);
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      status.textContent = '';
+      try {
+        await api('vehicles/' + vehicle.id + '/restore', { method: 'POST' }, garage);
+        if (activeGarage === garage) await loadGarage();
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    return row;
+  }));
+}
+
 async function loadGarage() {
   const load = ++garageLoad;
   byId('retry').hidden = true;
+  garageStatus.hidden = false;
   garageStatus.textContent = 'Loading your garage…';
   try {
-    const list = await api('vehicles');
+    const [list, removed] = await Promise.all([api('vehicles'), api('vehicles/removed')]);
     if (load !== garageLoad) return;
     vehicles = list;
+    renderRemoved(removed);
     garageStatus.hidden = true;
     byId('add-vehicle').disabled = false;
     render();
@@ -187,6 +241,8 @@ await setupGarageAccount(api, async id => {
   viewing = undefined;
   vehicleList.replaceChildren();
   byId('garage-overview').replaceChildren();
+  byId('removed-vehicles').open = false;
+  renderRemoved([]);
   byId('profile').hidden = true;
   byId('profile-content').replaceChildren();
   byId('garage').hidden = !id;

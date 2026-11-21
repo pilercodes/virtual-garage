@@ -64,15 +64,28 @@ async function garage(request, env, url) {
   const user = access.id;
   const starter = access.starter ? vehicles : [];
   if (url.pathname.startsWith('/api/workshop/')) return handleWorkshop(request, env, url, access, starter, { json, error, readBody, headers });
+  const { DB } = env;
+  const restore = /^\/api\/vehicles\/([a-z0-9-]{1,60})\/restore$/.exec(url.pathname);
+  if (restore && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return error('Request origin is not allowed.', 403);
+    const { meta } = await DB.prepare('DELETE FROM archived_vehicles WHERE owner = ? AND vehicle_id = ?').bind(user, restore[1]).run();
+    return meta.changes ? json({ id: restore[1] }) : error('Removed vehicle not found.', 404);
+  }
+  const removedOnly = url.pathname === '/api/vehicles/removed' && request.method === 'GET';
   const route = /^\/api\/vehicles(?:\/([a-z0-9-]{1,60}))?$/.exec(url.pathname);
   if (!route) {
     const serviceRoute = /^\/api\/vehicles\/([a-z0-9-]{1,60})\/maintenance$/.exec(url.pathname);
-    if (serviceRoute) return maintenance(request, env, url, user, serviceRoute[1], starter);
+    if (serviceRoute) {
+      const removed = await DB.prepare('SELECT 1 FROM archived_vehicles WHERE owner = ? AND vehicle_id = ?').bind(user, serviceRoute[1]).first();
+      if (removed) return error('Vehicle not found.', 404);
+      return maintenance(request, env, url, user, serviceRoute[1], starter);
+    }
     return error('Page not found.', 404);
   }
-  const { DB } = env;
   const vehicleId = route[1];
-  if (request.method === 'GET' && !vehicleId) {
+  if (request.method === 'GET' && (!vehicleId || removedOnly)) {
+    const { results: archived } = await DB.prepare('SELECT vehicle_id FROM archived_vehicles WHERE owner = ?').bind(user).all();
+    const removed = new Set(archived.map(row => row.vehicle_id));
     const { results } = await DB.prepare('SELECT id, year, make, model, color FROM vehicles WHERE owner = ? ORDER BY position, id').bind(user).all();
     const saved = new Map(results.map(row => [row.id, row]));
     const { results: photos } = await DB.prepare("SELECT id, vehicle_id FROM garage_files WHERE owner = ? AND target = 'vehicle' ORDER BY position, id")
@@ -81,7 +94,20 @@ async function garage(request, env, url) {
     for (const photo of photos) if (!primary.has(photo.vehicle_id)) primary.set(photo.vehicle_id, photo.id);
     return json([...starter.map(vehicle => saved.get(vehicle.id) ?? vehicle),
       ...results.filter(row => !starter.some(vehicle => vehicle.id === row.id))]
+      .filter(vehicle => removed.has(vehicle.id) === removedOnly)
       .map(vehicle => primary.has(vehicle.id) ? { ...vehicle, photo: primary.get(vehicle.id) } : vehicle));
+  }
+  if (request.method === 'DELETE' && vehicleId) {
+    if (request.headers.get('origin') !== url.origin) return error('Request origin is not allowed.', 403);
+    if (!starter.some(vehicle => vehicle.id === vehicleId) &&
+        !await DB.prepare('SELECT 1 FROM vehicles WHERE owner = ? AND id = ?').bind(user, vehicleId).first()) {
+      return error('Vehicle not found.', 404);
+    }
+    await DB.prepare('INSERT OR IGNORE INTO archived_vehicles (owner, vehicle_id) VALUES (?, ?)').bind(user, vehicleId).run();
+    return json({ id: vehicleId });
+  }
+  if (vehicleId && await DB.prepare('SELECT 1 FROM archived_vehicles WHERE owner = ? AND vehicle_id = ?').bind(user, vehicleId).first()) {
+    return error('Vehicle not found.', 404);
   }
   if ((request.method === 'POST' && !vehicleId) || (request.method === 'PUT' && vehicleId)) {
     if (request.headers.get('origin') !== url.origin) return error('Request origin is not allowed.', 403);

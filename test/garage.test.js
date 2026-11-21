@@ -78,3 +78,30 @@ test('maintenance can attach to an added vehicle and rejects other accounts and 
   assert.equal((await request(path, { method: 'POST', body, user: 'owner-b' })).status, 404);
   assert.equal((await request('vehicles/missing/maintenance')).status, 404);
 });
+
+test('removing and restoring a vehicle preserves its history and scopes access to its garage', async t => {
+  const request = fixture(t);
+  const body = { description: 'Existing service', date: '2025-01-15', mileage: 12345, cost: '74.50' };
+  assert.equal((await request('vehicles/corvette/maintenance', { method: 'POST', body })).status, 201);
+  const remove = { method: 'DELETE', body: {} };
+  assert.equal((await request('vehicles/corvette', { ...remove, from: 'https://wrong.test' })).status, 403);
+  assert.equal((await request('vehicles/corvette', remove)).status, 200);
+  assert.equal((await request('vehicles/corvette', remove)).status, 200);
+  assert.equal((await (await request('vehicles')).json()).some(vehicle => vehicle.id === 'corvette'), false);
+  assert.deepEqual((await (await request('vehicles/removed')).json()).map(vehicle => vehicle.id), ['corvette']);
+  for (const path of ['vehicles/corvette/maintenance', 'workshop/corvette/logs', 'workshop/corvette/files']) {
+    assert.equal((await request(path)).status, 404);
+  }
+  assert.deepEqual((await (await request('workshop/overview')).json()).logs, []);
+  assert.deepEqual(await (await request('vehicles/removed', { user: 'other' })).json(), []);
+  assert.equal((await request('vehicles/corvette/restore', { method: 'POST', body: {}, user: 'other' })).status, 404);
+  assert.equal((await request('vehicles/corvette/restore', { method: 'POST', body: {} })).status, 200);
+  assert.equal((await (await request('workshop/corvette/logs')).json())[0].title, 'Existing service');
+
+  const { id } = await (await request('vehicles', {
+    method: 'POST', body: { year: 2012, make: 'Demo', model: 'Custom' }
+  })).json();
+  assert.equal((await request('vehicles/' + id, { ...remove, user: 'other' })).status, 404);
+  assert.equal((await request('vehicles/' + id, remove)).status, 200);
+  assert.equal((await (await request('vehicles/removed')).json())[0].model, 'Custom');
+});

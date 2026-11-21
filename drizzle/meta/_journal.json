@@ -50,6 +50,13 @@
       "when": 1795254406000,
       "tag": "0007_workshop_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795254407000,
+      "tag": "0008_vehicle_archive",
+      "breakpoints": true
     }
   ]
 }
