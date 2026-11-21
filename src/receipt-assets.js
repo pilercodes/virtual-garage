@@ -8,19 +8,64 @@ const receiptAssets = {
   'pdf.worker.min.mjs': ['pdfjs-dist@4.10.38/build/pdf.worker.min.mjs', '1baa1844c89c80a5b2797c916e75ab29254be46d8e9cb53cb6364d7aad84be36']
 };
 
+async function receiptAssetDigest(bytes) {
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function receiptAssetBytes(stream) {
+  const reader = stream?.getReader();
+  if (!reader) throw new Error('Asset body missing');
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > 4 * 1024 * 1024) {
+      await reader.cancel();
+      throw new Error('Asset too large');
+    }
+    chunks.push(value);
+  }
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
 export async function handleReceiptAsset(request, env, path, headers) {
   const asset = path.slice('/receipt-assets/v1/'.length);
-  if (request.method !== 'GET' || !Object.hasOwn(receiptAssets, asset)) return new Response('Not found', { status: 404, headers });
+  const notFound = () => new Response('Not found', { status: 404, headers });
+  if (!Object.hasOwn(receiptAssets, asset)) return notFound();
   const [packagePath, hash] = receiptAssets[asset];
+  const bucketKey = 'system/receipt-assets/' + hash;
+  const responseHeaders = { ...headers, 'Cache-Control': 'public, max-age=31536000, immutable',
+    'Content-Type': asset.endsWith('.gz') ? 'application/octet-stream' : 'text/javascript; charset=utf-8' };
+  if (request.method === 'PUT') {
+    const token = env.RECEIPT_ASSET_SETUP_TOKEN;
+    if (!env.BUCKET || typeof token !== 'string' || token.length < 40 ||
+        request.headers.get('authorization') !== 'Bearer ' + token) return notFound();
+    try {
+      const bytes = await receiptAssetBytes(request.body);
+      if (await receiptAssetDigest(bytes) !== hash) return new Response('Invalid dependency bytes', { status: 400, headers });
+      await env.BUCKET.put(bucketKey, bytes);
+      return new Response(null, { status: 204, headers });
+    } catch {
+      return new Response('Could not store dependency', { status: 400, headers });
+    }
+  }
+  if (request.method !== 'GET') return notFound();
   try {
+    const stored = await env.BUCKET?.get(bucketKey);
+    if (stored) return new Response(stored.body, { headers: responseHeaders });
     const getAsset = env.RECEIPT_ASSET_FETCH || fetch;
     const upstream = await getAsset('https://cdn.jsdelivr.net/npm/' + packagePath, { redirect: 'error', signal: AbortSignal.timeout(20000) });
     if (!upstream.ok) throw new Error('Dependency unavailable');
-    const bytes = await upstream.arrayBuffer();
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
-    if (digest !== hash) throw new Error('Dependency integrity check failed');
-    const responseHeaders = { ...headers, 'Cache-Control': 'public, max-age=31536000, immutable',
-      'Content-Type': asset.endsWith('.gz') ? 'application/octet-stream' : 'text/javascript; charset=utf-8' };
+    const bytes = await receiptAssetBytes(upstream.body);
+    if (await receiptAssetDigest(bytes) !== hash) throw new Error('Dependency integrity check failed');
     return new Response(bytes, { headers: responseHeaders });
   } catch {
     return new Response('Receipt reading assets are temporarily unavailable.', { status: 502, headers });
