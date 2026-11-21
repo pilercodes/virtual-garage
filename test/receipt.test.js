@@ -41,3 +41,15 @@ test('the dependency route rejects arbitrary names and fails closed on a hash mi
   assert.equal((await handleReceiptAsset(request, env, new URL(request.url).pathname, {})).status, 502);
   assert.equal(upstream, 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js');
 });
+
+test('asset bootstrap needs its deployment secret and refuses unknown binary contents', async () => {
+  const path = '/receipt-assets/v1/tesseract.min.js';
+  let writes = 0;
+  const env = { BUCKET: { put() { writes++; } }, RECEIPT_ASSET_SETUP_TOKEN: 'fixture-token-that-is-longer-than-forty-characters' };
+  const send = authorization => handleReceiptAsset(new Request('https://garage.test' + path, {
+    method: 'PUT', headers: { authorization }, body: 'fixture'
+  }), env, path, {});
+  assert.equal((await send('Bearer wrong')).status, 404);
+  assert.equal((await send('Bearer ' + env.RECEIPT_ASSET_SETUP_TOKEN)).status, 400);
+  assert.equal(writes, 0);
+});
