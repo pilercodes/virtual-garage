@@ -151,3 +151,9 @@ dialog input[type=checkbox] { width: 1.25rem; min-height: 1.25rem; accent-color:
 #password-reset, #account-recovery { margin-top: .9rem; }
 #password-reset summary, #account-recovery summary { color: var(--accent); cursor: pointer; padding-block: .5rem; }
 #password-reset-form button { margin-top: .75rem; }
+
+.receipt-editor { margin-top: 1rem; }
+.receipt-editor > summary { cursor: pointer; color: var(--accent); padding-block: .5rem; }
+.receipt-editor p { margin-block: .4rem; }
+.receipt-suggestion { margin-top: .75rem; }
+.receipt-suggestion button { margin: .5rem .5rem 0 0; }

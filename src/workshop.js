@@ -101,21 +101,51 @@ async function workshopFiles(request, env, url, owner, vehicle, id, helpers) {
   if (!id && request.method === 'POST') {
     const target = url.searchParams.get('target') ?? '';
     if (!await workshopTarget(DB, owner, vehicle, target)) return error('Attachment target not found.', 404);
+    const isReceipt = target.startsWith('receipt:');
+    const uploadId = isReceipt ? url.searchParams.get('uploadId') : null;
+    if (uploadId && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(uploadId)) return error('Invalid receipt identifier.', 400);
+    if (uploadId) {
+      const existing = await DB.prepare('SELECT vehicle_id, target FROM garage_files WHERE owner = ? AND id = ?').bind(owner, uploadId).first();
+      if (existing) return existing.vehicle_id === vehicle && existing.target === target
+        ? json({ id: uploadId }) : error('Receipt identifier already in use.', 409);
+    }
+    let detail = {};
+    const rawDetail = isReceipt ? request.headers.get('x-receipt-details') : null;
+    if (rawDetail) {
+      try {
+        if (rawDetail.length > 4096) return error('Receipt details are too long.', 400);
+        const data = JSON.parse(decodeURIComponent(rawDetail));
+        detail = { retailer: workshopText(data?.retailer, 200), date: workshopDate(data?.date), cost: workshopNumber(data?.cost) };
+      } catch {
+        return error('Invalid receipt details.', 400);
+      }
+    }
     const count = await DB.prepare('SELECT COUNT(*) AS count FROM garage_files WHERE owner = ? AND vehicle_id = ?')
       .bind(owner, vehicle).first();
     if (count.count >= 250) return error('This vehicle has reached its attachment limit.', 409);
     const bytes = await workshopBytes(request, 10 * 1024 * 1024);
     const mime = bytes && workshopMime(bytes);
     if (!mime || (!/^(receipt|warranty|part-warranty):/.test(target) && !mime.startsWith('image/'))) return error('Upload a JPEG, PNG, WebP, GIF, or PDF up to 10 MB. Vehicle photos must be images.', 400);
-    id = crypto.randomUUID();
+    id = uploadId || crypto.randomUUID();
     const name = workshopText(url.searchParams.get('name'), 180) || ('upload.' + workshopTypes[mime]);
-    await DB.prepare('INSERT INTO garage_file_cleanup (owner, id, due) VALUES (?, ?, ?)')
+    const intent = await DB.prepare('INSERT INTO garage_file_cleanup (owner, id, due) VALUES (?, ?, ?) ON CONFLICT DO NOTHING')
       .bind(owner, id, Date.now() + 15 * 60000).run();
-    await BUCKET.put(workshopObjectKey(owner, id), bytes);
+    if (!intent.meta.changes) return error('This upload is still pending. Try again shortly or reselect the receipt.', 409);
+    try {
+      await BUCKET.put(workshopObjectKey(owner, id), bytes);
+    } catch (cause) {
+      try {
+        await BUCKET.delete(workshopObjectKey(owner, id));
+        await DB.prepare('DELETE FROM garage_file_cleanup WHERE owner = ? AND id = ?').bind(owner, id).run();
+      } catch {
+        // Keep queued cleanup if the object store's final state is uncertain.
+      }
+      throw cause;
+    }
     const [result] = await DB.batch([
-      DB.prepare(`INSERT INTO garage_files (owner, vehicle_id, id, target, mime, name, size, position)
-        SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM garage_files WHERE owner = ? AND vehicle_id = ?) < 250`)
-        .bind(owner, vehicle, id, target, mime, name, bytes.byteLength, Date.now(), owner, vehicle),
+      DB.prepare(`INSERT INTO garage_files (owner, vehicle_id, id, target, mime, name, size, detail, position)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM garage_files WHERE owner = ? AND vehicle_id = ?) < 250`)
+        .bind(owner, vehicle, id, target, mime, name, bytes.byteLength, JSON.stringify(detail), Date.now(), owner, vehicle),
       DB.prepare('DELETE FROM garage_file_cleanup WHERE owner = ? AND id = ? AND EXISTS (SELECT 1 FROM garage_files WHERE owner = ? AND id = ?)')
         .bind(owner, id, owner, id)
     ]);

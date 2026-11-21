@@ -6,6 +6,7 @@ on:
       - 'scripts/record.mjs'
       - 'scripts/check-accounts.mjs'
       - 'scripts/check-workshop.mjs'
+      - 'scripts/check-receipts.mjs'
       - 'src/**'
       - 'drizzle/**'
 permissions:
@@ -32,6 +33,7 @@ jobs:
           curl --fail --retry 10 --retry-connrefused -sS http://127.0.0.1:3000/ > /dev/null
           node scripts/record.mjs recordings
           node scripts/check-workshop.mjs
+          node scripts/check-receipts.mjs
       - name: Verify separate accounts and shared garage in Chromium
         env:
           GARAGE_DB: ":memory:"

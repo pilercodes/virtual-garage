@@ -13,12 +13,12 @@ async function workshopFixture(t) {
   const DB = localDatabase();
   t.after(async () => { DB.close(); await rm(path, { recursive: true, force: true }); });
   const origin = 'https://garage.test';
-  return async (route, method = 'GET', data, owner = 'owner', bucket = localBucket(path)) => {
+  return async (route, method = 'GET', data, owner = 'owner', bucket = localBucket(path), extraHeaders = {}) => {
     const binary = data instanceof Uint8Array;
     return worker.fetch(new Request(origin + '/api/workshop/corvette/' + route, {
       method,
       headers: { origin, 'content-type': binary ? 'application/octet-stream' : 'application/json',
-        ...(owner ? { 'oai-authenticated-user-id': owner } : {}) },
+        ...(owner ? { 'oai-authenticated-user-id': owner } : {}), ...extraHeaders },
       body: data === undefined ? undefined : binary ? data : JSON.stringify(data)
     }), { DB, BUCKET: bucket, LOCAL_LEGACY_PREVIEW: true });
   };
@@ -129,4 +129,22 @@ test('vehicle specifications save unknown mileage and optional custom fields', a
   const [spec] = await (await call('records')).json();
   assert.equal(spec.mileage, null);
   assert.deepEqual(spec.custom, [{ label: 'Wheel offset', value: 'Reference only' }]);
+});
+
+test('receipt metadata is saved once without charging the log', async t => {
+  const call = await workshopFixture(t);
+  const { id } = await (await call('logs', 'POST', {
+    title: 'Existing repair', type: 'repair', status: 'completed', date: '2026-05-04', cost: 1200
+  })).json();
+  const uploadId = crypto.randomUUID();
+  const route = 'files?target=receipt:' + id + '&uploadId=' + uploadId + '&name=receipt.pdf';
+  const bytes = new TextEncoder().encode('%PDF-1.7');
+  const detail = { retailer: 'Demo Auto', date: '2026-05-03', cost: 3495 };
+  const upload = () => call(route, 'POST', bytes, 'owner', undefined, { 'x-receipt-details': encodeURIComponent(JSON.stringify(detail)) });
+  assert.equal((await upload()).status, 201);
+  assert.equal((await upload()).status, 200);
+  const list = await (await call('files')).json();
+  assert.equal(list.length, 1);
+  assert.deepEqual(list[0].detail, detail);
+  assert.equal((await (await call('logs')).json())[0].cost, 1200);
 });

@@ -8,6 +8,9 @@ const assets = {
   '/account-ui.js': ['account-ui.js', 'text/javascript; charset=utf-8'],
   '/workshop-export.js': ['workshop-export.js', 'text/javascript; charset=utf-8'],
   '/workshop-model.js': ['workshop-model.js', 'text/javascript; charset=utf-8'],
+  '/receipt-reader.js': ['receipt-reader.js', 'text/javascript; charset=utf-8'],
+  '/receipt-fields.js': ['receipt-fields.js', 'text/javascript; charset=utf-8'],
+  '/receipt-editor.js': ['receipt-editor.js', 'text/javascript; charset=utf-8'],
   '/workshop-ui.js': ['workshop-ui.js', 'text/javascript; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/vehicles.webp': ['vehicles.webp', 'image/webp']
@@ -28,10 +31,14 @@ if (!accountImport.test(worker)) throw new Error('Worker accounts import changed
 const workshop = await readFile(new URL('../src/workshop.js', import.meta.url), 'utf8');
 const workshopImport = "import { handleWorkshop } from './workshop.js';";
 if (!worker.includes(workshopImport)) throw new Error('Worker workshop import changed.');
+const receiptAssetsSource = await readFile(new URL('../src/receipt-assets.js', import.meta.url), 'utf8');
+const receiptAssetsImport = "import { handleReceiptAsset } from './receipt-assets.js';";
+if (!worker.includes(receiptAssetsImport)) throw new Error('Worker receipt assets import changed.');
 await mkdir('dist/.openai', { recursive: true });
 await copyFile('.openai/hosting.json', 'dist/.openai/hosting.json');
 await mkdir('dist/server', { recursive: true });
 await writeFile('dist/server/index.js', 'const assets = ' + JSON.stringify(contents) + ';\n' +
   worker.replace(modelImport, () => model.replace(/^export /gm, ''))
     .replace(accountImport, () => accounts.replace(/^export /gm, ''))
-    .replace(workshopImport, () => workshop.replace(/^export /gm, '')));
+    .replace(workshopImport, () => workshop.replace(/^export /gm, ''))
+    .replace(receiptAssetsImport, () => receiptAssetsSource.replace(/^export /gm, '')));
