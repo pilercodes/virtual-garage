@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { localBucket } from '../scripts/local-bucket.mjs';
 import { localDatabase } from '../scripts/local-db.mjs';
 import worker from '../src/worker.js';
+import { expenseSummary, nextService, partState } from '../src/public/workshop-model.js';
 
 async function workshopFixture(t) {
   const path = await mkdtemp(join(tmpdir(), 'workshop-test-'));
@@ -71,4 +72,24 @@ test('receipts and step photos remain associated and reusable steps are snapshot
   assert.equal((await (await call('files')).json()).length, 1);
   await call('logs/' + id, 'DELETE');
   assert.deepEqual(await (await call('files')).json(), []);
+});
+
+test('parts created in a log remain linked and are not charged again in later work', async t => {
+  const call = await workshopFixture(t);
+  const data = { title: 'Install exhaust', type: 'upgrade', status: 'completed', date: '2026-06-03',
+    expenses: { parts: 50, labor: 1000, misc: 250 }, newPart: { title: 'Exhaust', price: 15000, brand: 'Demo' } };
+  const response = await call('logs', 'POST', data);
+  assert.equal(response.status, 201);
+  const [part] = await (await call('records')).json();
+  const [install] = await (await call('logs')).json();
+  assert.deepEqual(install.partIds, [part.id]);
+  assert.equal(partState(part, [install]).status, 'installed');
+  const removal = await call('logs', 'POST', { ...data, title: 'Remove exhaust', date: '2026-06-04',
+    expenses: { labor: 500 }, partIds: [part.id], partAction: 'removed', newPart: {} });
+  assert.equal(removal.status, 201);
+  const logs = await (await call('logs')).json();
+  assert.equal(partState(part, logs).status, 'removed');
+  assert.equal(expenseSummary(logs, [part]).total, 16800);
+  assert.equal((await call('records/' + part.id, 'DELETE')).status, 409);
+  assert.equal((await call('logs', 'POST', { ...data, partIds: ['missing'] })).status, 400);
 });

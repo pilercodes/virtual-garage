@@ -121,3 +121,6 @@ textarea { resize: vertical; }
 .workshop-attachments { margin: .65rem 0; }
 .workshop-attachments input[type=file] { max-width: 100%; }
 .workshop-content > .primary { margin-bottom: .55rem; }
+.workshop-content progress { width: 100%; accent-color: var(--accent); }
+dialog fieldset { margin-block: .75rem; border: 1px solid var(--line); }
+dialog input[type=checkbox] { width: 1.25rem; min-height: 1.25rem; accent-color: var(--accent); }

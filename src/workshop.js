@@ -92,7 +92,7 @@ async function workshopFiles(request, env, url, owner, vehicle, id, helpers) {
     if (count.count >= 250) return error('This vehicle has reached its attachment limit.', 409);
     const bytes = await workshopBytes(request, 10 * 1024 * 1024);
     const mime = bytes && workshopMime(bytes);
-    if (!mime || (!/^(receipt|warranty):/.test(target) && !mime.startsWith('image/'))) return error('Upload a JPEG, PNG, WebP, GIF, or PDF up to 10 MB. Vehicle photos must be images.', 400);
+    if (!mime || (!/^(receipt|warranty|part-warranty):/.test(target) && !mime.startsWith('image/'))) return error('Upload a JPEG, PNG, WebP, GIF, or PDF up to 10 MB. Vehicle photos must be images.', 400);
     id = crypto.randomUUID();
     const name = workshopText(url.searchParams.get('name'), 180) || ('upload.' + workshopTypes[mime]);
     await BUCKET.put(workshopObjectKey(owner, id), bytes);
@@ -143,11 +143,50 @@ function workshopSteps(value) {
 
 async function workshopTarget(db, owner, vehicle, target) {
   if (target === 'vehicle') return true;
+  const record = new RegExp('^(part|part-warranty|project):(' + workshopId + ')$').exec(target);
+  if (record) return Boolean(await db.prepare('SELECT id FROM workshop_records WHERE owner = ? AND vehicle_id = ? AND kind = ? AND id = ?')
+    .bind(owner, vehicle, record[1] === 'part-warranty' ? 'part' : record[1], record[2]).first());
   const match = new RegExp('^(log|receipt|warranty):(' + workshopId + ')$|^step:(' + workshopId + '):(' + workshopId + ')$').exec(target);
   if (!match) return false;
   const row = await db.prepare('SELECT details FROM maintenance WHERE owner = ? AND vehicle_id = ? AND id = ?')
     .bind(owner, vehicle, match[2] || match[3]).first();
   return Boolean(row && (!match[4] || (JSON.parse(row.details).steps || []).some(step => step.id === match[4])));
+}
+
+function workshopWarranty(value) {
+  return { provider: workshopText(value?.provider, 150), start: workshopDate(value?.start),
+    expires: workshopDate(value?.expires), limit: workshopNumber(value?.limit, 9999999) };
+}
+
+function workshopIds(value) {
+  const pattern = new RegExp('^' + workshopId + '$');
+  return Array.isArray(value) ? [...new Set(value.filter(id => typeof id === 'string' && pattern.test(id)))].slice(0, 40) : [];
+}
+
+function workshopRecordData(input) {
+  const title = workshopText(input?.title, 120);
+  const notes = workshopText(input?.notes);
+  if (!title) return null;
+  if (input.kind === 'procedure') return { title, notes, steps: workshopSteps(input.steps) };
+  if (input.kind === 'part') {
+    const status = input.status;
+    if (!['planned', 'purchased', 'installed', 'removed', 'replaced'].includes(status)) return null;
+    const rawUrl = workshopText(input.url, 1000);
+    const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : '';
+    return { title, notes, status, brand: workshopText(input.brand, 120), number: workshopText(input.number, 120),
+      category: workshopText(input.category, 120), purchaseDate: workshopDate(input.purchaseDate),
+      price: workshopNumber(input.price), retailer: workshopText(input.retailer, 150), url,
+      installDate: workshopDate(input.installDate), warranty: workshopWarranty(input.warranty) };
+  }
+  return null;
+}
+
+async function workshopRelated(db, owner, vehicle, kind, ids) {
+  if (!ids.length) return true;
+  const marks = ids.map(() => '?').join(',');
+  const row = await db.prepare('SELECT COUNT(*) AS count FROM workshop_records WHERE owner = ? AND vehicle_id = ? AND kind = ? AND id IN (' + marks + ')')
+    .bind(owner, vehicle, kind, ...ids).first();
+  return row.count === ids.length;
 }
 
 async function workshopRecords(request, env, owner, vehicle, id, helpers) {
@@ -161,20 +200,30 @@ async function workshopRecords(request, env, owner, vehicle, id, helpers) {
   if (request.method === 'POST' && !id || request.method === 'PUT' && id) {
     const input = await readBody(request);
     const kind = input?.kind;
-    const title = workshopText(input?.title, 120);
-    if (kind !== 'procedure' || !title) return error('Enter a procedure title.', 400);
-    const data = JSON.stringify({ title, notes: workshopText(input.notes), steps: workshopSteps(input.steps) });
+    const item = workshopRecordData(input);
+    if (!item) return error('Check this record’s title and fields.', 400);
+    const targetVehicle = kind === 'procedure' ? '' : vehicle;
+    const data = JSON.stringify(item);
     if (!id) {
       id = crypto.randomUUID();
       await DB.prepare('INSERT INTO workshop_records (owner, vehicle_id, kind, id, data) VALUES (?, ?, ?, ?, ?)')
-        .bind(owner, '', kind, id, data).run();
+        .bind(owner, targetVehicle, kind, id, data).run();
       return json({ id }, 201);
     }
     const { meta } = await DB.prepare('UPDATE workshop_records SET data = ?, revision = revision + 1 WHERE owner = ? AND vehicle_id = ? AND kind = ? AND id = ? AND revision = ?')
-      .bind(data, owner, '', kind, id, input.revision ?? -1).run();
+      .bind(data, owner, targetVehicle, kind, id, input.revision ?? -1).run();
     return meta.changes ? json({ id }) : error('This record changed. Reload before saving.', 409);
   }
   if (request.method === 'DELETE' && id) {
+    const row = await DB.prepare('SELECT kind FROM workshop_records WHERE owner = ? AND vehicle_id IN (?, ?) AND id = ?')
+      .bind(owner, vehicle, '', id).first();
+    if (!row) return error('Record not found.', 404);
+    if (row.kind === 'part') {
+      const linked = await DB.prepare(`SELECT id FROM maintenance WHERE owner = ? AND vehicle_id = ?
+        AND EXISTS (SELECT 1 FROM json_each(maintenance.details, '$.partIds') WHERE value = ?) LIMIT 1`)
+        .bind(owner, vehicle, id).first();
+      if (linked) return error('Unlink this part from its activity records before deleting it. Use Removed to preserve history.', 409);
+    }
     await DB.prepare('DELETE FROM workshop_records WHERE owner = ? AND vehicle_id IN (?, ?) AND id = ?').bind(owner, vehicle, '', id).run();
     return json({ id });
   }
@@ -197,15 +246,33 @@ async function workshopLogs(request, env, owner, vehicle, id, helpers) {
     if (!title || !date || !workshopLogTypes.includes(input.type) || !workshopStatuses.includes(input.status) ||
         (input.mileage != null && input.mileage !== '' && mileage === null)) return error('Enter a title, date, valid type and status.', 400);
     const notes = workshopText(input.notes);
-    const cost = workshopNumber(input.cost) ?? 0;
+    const expenses = input.expenses && typeof input.expenses === 'object' ? {
+      parts: workshopNumber(input.expenses.parts) ?? 0, labor: workshopNumber(input.expenses.labor) ?? 0,
+      misc: workshopNumber(input.expenses.misc) ?? 0
+    } : null;
+    const cost = expenses ? expenses.parts + expenses.labor + expenses.misc : workshopNumber(input.cost) ?? 0;
+    const partIds = workshopIds(input.partIds);
+    if (!await workshopRelated(DB, owner, vehicle, 'part', partIds)) return error('A selected part is unavailable.', 400);
+    const newPart = workshopText(input.newPart?.title, 120) ? workshopRecordData({ ...input.newPart, kind: 'part',
+      status: input.status === 'completed' ? 'installed' : 'planned', installDate: input.status === 'completed' ? date : '' }) : null;
+    const newPartId = newPart && crypto.randomUUID();
+    if (newPartId) partIds.push(newPartId);
+    const partAction = ['installed', 'removed', 'replaced'].includes(input.partAction) ? input.partAction :
+      newPartId ? 'installed' : '';
     const steps = workshopSteps(input.steps);
-    const details = JSON.stringify({ unknownMileage: mileage === null, steps, guideDraft: input.guideDraft === true });
+    const details = JSON.stringify({ unknownMileage: mileage === null, steps, guideDraft: input.guideDraft === true,
+      ...(expenses ? { expenses } : {}), partIds, partAction });
+    const createPart = newPartId && DB.prepare('INSERT INTO workshop_records (owner, vehicle_id, kind, id, data) VALUES (?, ?, ?, ?, ?)')
+      .bind(owner, vehicle, 'part', newPartId, JSON.stringify(newPart));
     if (!id) {
       id = crypto.randomUUID();
-      await DB.prepare('INSERT INTO maintenance (owner, vehicle_id, id, description, date, mileage, cost_cents, notes, entry_type, status, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(owner, vehicle, id, title, date, mileage ?? 0, cost, notes, input.type, input.status, details).run();
+      const insert = DB.prepare('INSERT INTO maintenance (owner, vehicle_id, id, description, date, mileage, cost_cents, notes, entry_type, status, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(owner, vehicle, id, title, date, mileage ?? 0, cost, notes, input.type, input.status, details);
+      if (createPart) await DB.batch([createPart, insert]);
+      else await insert.run();
       return json({ id }, 201);
     }
+    if (createPart) return error('Create a new part when adding a log or use the parts list.', 400);
     const { meta } = await DB.prepare('UPDATE maintenance SET description = ?, date = ?, mileage = ?, cost_cents = ?, notes = ?, entry_type = ?, status = ?, details = ?, revision = revision + 1 WHERE owner = ? AND vehicle_id = ? AND id = ? AND revision = ?')
       .bind(title, date, mileage ?? 0, cost, notes, input.type, input.status, details, owner, vehicle, id, input.revision ?? -1).run();
     if (!meta.changes) return error('This entry changed. Reload before saving.', 409);

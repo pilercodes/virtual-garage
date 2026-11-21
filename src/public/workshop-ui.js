@@ -1,4 +1,6 @@
+import { expenseSummary, partState, nextService } from './workshop-model.js';
 const logTypes = { maintenance: 'Maintenance', repair: 'Repair', upgrade: 'Upgrade / Modification', inspection: 'Inspection / Diagnosis' };
+const partStatuses = { planned: 'Planned', purchased: 'Purchased', installed: 'Installed', removed: 'Removed', replaced: 'Replaced' };
 const logStatuses = { planned: 'Planned', 'in-progress': 'In Progress', completed: 'Completed' };
 const dollars = cents => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format((cents || 0) / 100);
 const shortDate = value => value ? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value + 'T00:00:00Z')) : '—';
@@ -75,6 +77,7 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
   let records = [];
   let tab = 'activity';
   let disposed = false;
+  let partQuery = '';
   const filter = { query: '', type: '', status: '', start: '', end: '', sort: 'date' };
 
   function write(path, method, body) {
@@ -233,12 +236,41 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
       form.append(title, workshopField('type', 'Log type', log.type || 'maintenance', 'text', logTypes),
         workshopField('status', 'Status', log.status || 'completed', 'text', logStatuses), date,
         workshopField('mileage', 'Odometer (mi)', log.mileage, 'number'), workshopField('notes', 'Description and notes', log.notes, 'textarea'),
-        workshopField('cost', 'Cost (USD)', log.cost == null ? '' : log.cost / 100, 'number'));
+        workshopField('cost', 'Other cost (USD)', log.expenses ? log.expenses.misc / 100 : log.cost == null ? '' : log.cost / 100, 'number'));
       form.elements.cost.step = '0.01';
+      const extras = workshopNode('details');
+      extras.append(workshopNode('summary', 'Parts and itemized costs'),
+        workshopField('partsCost', 'Additional parts cost (USD)', log.expenses?.parts == null ? '' : log.expenses.parts / 100, 'number'),
+        workshopField('laborCost', 'Labor cost (USD)', log.expenses?.labor == null ? '' : log.expenses.labor / 100, 'number'),
+        workshopNode('p', 'Enter inventory purchase prices on the part. Include only additional costs here.'),
+        workshopField('partAction', 'Action for linked parts', log.partAction || '', 'text',
+          { '': 'Serviced / referenced', installed: 'Installed', removed: 'Removed', replaced: 'Replaced' }));
+      const parts = workshopNode('fieldset');
+      parts.append(workshopNode('legend', 'Link existing parts'));
+      for (const part of records.filter(record => record.kind === 'part')) {
+        const label = workshopNode('label', part.title);
+        const check = workshopNode('input');
+        check.type = 'checkbox'; check.name = 'partIds'; check.value = part.id; check.checked = log.partIds?.includes(part.id) || false;
+        label.append(check); parts.append(label);
+      }
+      extras.append(parts);
+      const newPart = workshopNode('div');
+      if (!log.id) newPart.append(workshopField('newPart', 'New part name', ''), workshopField('newPartBrand', 'New part brand'),
+        workshopField('newPartNumber', 'New part number'), workshopField('newPartPrice', 'New part purchase price (USD)', '', 'number'));
+      const typeField = form.elements.type;
+      const togglePartFields = () => { newPart.hidden = !['repair', 'upgrade'].includes(typeField.value); };
+      typeField.addEventListener('change', togglePartFields);
+      togglePartFields();
+      extras.append(newPart);
+      form.append(extras);
+      for (const name of ['partsCost', 'laborCost', 'newPartPrice']) if (form.elements[name]) form.elements[name].step = '0.01';
       if (!log.id) form.append(workshopField('procedure', 'Start with a procedure (optional)', '', 'text',
         Object.fromEntries([['', 'No procedure'], ...records.filter(record => record.kind === 'procedure').map(record => [record.id, record.title])])));
-    }, data => write('logs' + (log.id ? '/' + log.id : ''), log.id ? 'PUT' : 'POST',
+    }, (data, form) => write('logs' + (log.id ? '/' + log.id : ''), log.id ? 'PUT' : 'POST',
       { ...log, ...data, cost: dollarsToCents(data.cost), revision: log.revision,
+        expenses: { parts: dollarsToCents(data.partsCost), labor: dollarsToCents(data.laborCost), misc: dollarsToCents(data.cost) },
+        partIds: new FormData(form).getAll('partIds'),
+        newPart: ['repair', 'upgrade'].includes(data.type) ? { title: data.newPart, brand: data.newPartBrand, number: data.newPartNumber, price: dollarsToCents(data.newPartPrice) } : null,
         steps: log.steps || (records.find(record => record.id === data.procedure)?.steps || []).map(step => ({ ...step, id: crypto.randomUUID() })) }));
   }
 
@@ -361,6 +393,9 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     }
     card.append(workshopNode('span', logTypes[log.type], 'workshop-badge ' + log.type), heading,
       workshopNode('p', [shortDate(log.date), logStatuses[log.status], log.mileage == null ? '' : Number(log.mileage).toLocaleString() + ' mi', dollars(log.cost)].filter(Boolean).join(' · ')));
+    if (log.expenses) card.append(workshopNode('p', 'Parts ' + dollars(log.expenses.parts) + ' · Labor ' +
+      dollars(log.expenses.labor) + ' · Other ' + dollars(log.expenses.misc)));
+    for (const part of records.filter(part => log.partIds?.includes(part.id))) card.append(workshopNode('p', 'Part · ' + part.title));
     if (log.notes) card.append(workshopNode('p', log.notes, 'notes'));
     const details = workshopNode('details');
     details.append(workshopNode('summary', 'Photos and actions'),
@@ -401,13 +436,82 @@ export function mountWorkshop(root, vehicle, garage, api, updatePhoto) {
     draw();
   }
 
+  function partEditor(part = {}) {
+    edit(part.id ? 'Edit part' : 'Add part', form => {
+      for (const [name, title, type] of [
+        ['title', 'Part name', 'text'], ['brand', 'Manufacturer / brand', 'text'], ['number', 'Part number', 'text'],
+        ['category', 'Category', 'text'], ['purchaseDate', 'Purchase date', 'date'], ['price', 'Purchase price (USD)', 'number'],
+        ['retailer', 'Retailer', 'text'], ['url', 'Purchase URL', 'url'], ['installDate', 'Installation date', 'date'], ['notes', 'Notes', 'textarea']
+      ]) form.append(workshopField(name, title, name === 'price' ? part.price == null ? '' : part.price / 100 : part[name], type));
+      form.elements.title.required = true;
+      form.elements.price.step = '0.01';
+      form.append(workshopField('status', 'Status', part.status || 'planned', 'text', partStatuses));
+    }, data => write('records' + (part.id ? '/' + part.id : ''), part.id ? 'PUT' : 'POST',
+      { ...part, ...data, kind: 'part', price: dollarsToCents(data.price) }));
+  }
+
+  function showParts() {
+    const search = workshopField('partSearch', 'Search parts', partQuery, 'search');
+    const list = workshopNode('div', null, 'workshop-list');
+    const draw = () => {
+      const items = records.filter(part => part.kind === 'part' && [part.title, part.brand, part.number, part.category, part.notes]
+        .join(' ').toLowerCase().includes(partQuery.toLowerCase()));
+      list.replaceChildren(...items.map(part => {
+        const item = workshopNode('article', null, 'workshop-item');
+        const state = partState(part, logs);
+        item.append(workshopNode('h3', part.title), workshopNode('p', [partStatuses[state.status], part.brand, part.number, part.category,
+          part.price == null ? '' : dollars(part.price), state.installDate ? 'Installed ' + shortDate(state.installDate) : ''].filter(Boolean).join(' · ')),
+          workshopNode('p', part.notes, 'notes'));
+        if (part.url) { const link = workshopNode('a', part.retailer || 'Purchase page'); link.href = part.url; link.rel = 'noopener noreferrer'; link.target = '_blank'; item.append(link); }
+        else if (part.retailer) item.append(workshopNode('p', part.retailer));
+        const details = workshopNode('details');
+        details.append(workshopNode('summary', 'Photos and linked history'), attachments('part:' + part.id));
+        for (const log of logs.filter(log => log.partIds?.includes(part.id))) details.append(workshopNode('p',
+          shortDate(log.date) + ' · ' + log.title + (log.partAction ? ' · ' + partStatuses[log.partAction] : '')));
+        item.append(details, workshopButton('Edit part', () => partEditor(part)), workshopButton('Delete part', event => {
+          if (confirm('Delete this part? Set its status to Removed if you want to keep its history.')) run(event.currentTarget, async () => {
+            await write('records/' + part.id, 'DELETE'); await refresh();
+          });
+        }));
+        return item;
+      }));
+      if (!items.length) list.append(workshopNode('p', 'No parts match.'));
+    };
+    search.lastChild.addEventListener('input', event => { partQuery = event.target.value; draw(); });
+    contents.append(workshopButton('Add part', () => partEditor(), 'primary'), search, list);
+    draw();
+  }
+
+  function showExpenses() {
+    const summary = expenseSummary(logs, records.filter(record => record.kind === 'part'));
+    contents.append(workshopNode('h2', 'Recorded spending'), workshopNode('p', dollars(summary.total) + ' lifetime total'),
+      workshopNode('p', 'Completed logs and purchased inventory are counted once. Receipts do not add duplicate costs.'));
+    const bars = (title, rows) => {
+      const panel = workshopNode('section', null, 'workshop-item');
+      panel.append(workshopNode('h3', title));
+      const max = Math.max(1, ...rows.map(([, amount]) => amount));
+      for (const [label, amount] of rows) {
+        const group = workshopNode('label', label + ' · ' + dollars(amount));
+        const bar = workshopNode('progress');
+        bar.max = max; bar.value = amount;
+        group.append(bar); panel.append(group);
+      }
+      if (!rows.length) panel.append(workshopNode('p', 'No recorded costs.'));
+      contents.append(panel);
+    };
+    bars('Spending by activity', Object.entries(summary.types).map(([key, value]) => [logTypes[key] || 'Inventory purchases', value]));
+    bars('Spending by month', Object.entries(summary.months).sort(([a], [b]) => b.localeCompare(a)));
+  }
+
   function render() {
     status.textContent = '';
     contents.replaceChildren();
-    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos', procedures: 'Procedures' }).map(([id, label]) =>
+    actions.replaceChildren(...Object.entries({ activity: 'Vehicle Log', photos: 'Photos', procedures: 'Procedures', parts: 'Parts & Modifications', expenses: 'Spending' }).map(([id, label]) =>
       workshopButton(label, () => { tab = id; render(); }, tab === id ? 'primary' : 'secondary')));
     if (tab === 'photos') contents.append(workshopNode('h2', 'Vehicle photos'), attachments('vehicle'));
     else if (tab === 'procedures') showProcedures();
+    else if (tab === 'parts') showParts();
+    else if (tab === 'expenses') showExpenses();
     else showLogs();
   }
 

@@ -4,6 +4,7 @@ const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
   '/account-ui.js': ['account-ui.js', 'text/javascript; charset=utf-8'],
+  '/workshop-model.js': ['workshop-model.js', 'text/javascript; charset=utf-8'],
   '/workshop-ui.js': ['workshop-ui.js', 'text/javascript; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/vehicles.webp': ['vehicles.webp', 'image/webp']
