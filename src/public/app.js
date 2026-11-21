@@ -48,11 +48,11 @@ function setImage(node, vehicle) {
     return;
   }
   const imageVehicles = {
-    corvette: [2003, 'Chevrolet', 'Corvette Z06', 'Silver'],
-    challenger: [2009, 'Dodge', 'Challenger SRT', 'Hemi Orange'],
-    corolla: [2012, 'Toyota', 'Corolla', '']
+    corvette: [2003, 'Chevrolet', 'Corvette Z06'],
+    challenger: [2009, 'Dodge', 'Challenger SRT'],
+    corolla: [2012, 'Toyota', 'Corolla']
   };
-  if (imageVehicles[vehicle.id]?.every((value, index) => value === [vehicle.year, vehicle.make, vehicle.model, vehicle.color][index])) {
+  if (imageVehicles[vehicle.id]?.every((value, index) => value === [vehicle.year, vehicle.make, vehicle.model][index])) {
     node.dataset.car = vehicle.id;
   }
 }
